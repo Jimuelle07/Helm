@@ -131,7 +131,7 @@ truth lives.** Judgement quality is downstream of observation quality.
                  └───────────────────────┬───────────────────────────┘
                                          │  typed answers + confidence
                  ┌───────────────────────▼───────────────────────────┐
-                 │ COMPOSE (code) — thresholds, gates, fallback      │
+                 │ COMPOSE (code) — thresholds, gates, dispatch plan │
                  └───────────────────────┬───────────────────────────┘
                                          │
                  ┌───────────────────────▼───────────────────────────┐
@@ -181,9 +181,13 @@ pick?* Four reasons, in descending order of importance:
   reimplement them.
 - **Not an autonomous committer.** The default posture is recommend-and-explain. Execution is
   opt-in and gated by a `needs_human` Noul plus a blast-radius Score.
-- **Not cloud-dependent for correctness.** No `TYPESAFE_API_KEY` is set on this machine today, so a
-  deterministic fallback scorer is a first-class path, not an afterthought. The harness must be
-  useful before the key exists — and must say clearly which brain answered.
+- ~~**Not cloud-dependent for correctness.**~~ **Superseded.** This originally argued for a
+  deterministic fallback scorer as a first-class path, on the grounds that no `TYPESAFE_API_KEY`
+  was set on the machine at the time. That scorer was built, shipped, and then removed: it was
+  weakest at exactly the judgements the harness exists to make (agent fit, did-it-versus-described-it),
+  and a capped-confidence recommendation still reads as a recommendation. Helm is now cloud-dependent
+  by design — Jev is the decision layer, and without it the entry points exit rather than answer
+  worse. The reasoning is recorded in `references/jev-decision-layer.md`, "Why there is no fallback".
 
 ## 8. How we will know it worked
 

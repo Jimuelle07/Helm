@@ -423,13 +423,15 @@ class TestShouldRecover(unittest.TestCase):
         go, _ = D.should_recover({"judged_by": "jev"}, self.rec, 0, 1)
         self.assertTrue(go)
 
-    def test_a_fallback_verdict_never_triggers_a_retry(self):
-        # The standing rule in this codebase: a degraded judge may report but
-        # never act. The heuristic cannot tell a terse success from a no-op,
-        # so letting it retry would re-run work that already succeeded.
-        go, why = D.should_recover({"judged_by": "fallback"}, self.rec, 0, 1)
-        self.assertFalse(go)
-        self.assertIn("fallback", why)
+    def test_an_unjudged_verdict_never_triggers_a_retry(self):
+        # The standing rule in this codebase: only a Jev verdict may drive an
+        # action. An `error`/`unjudged` run is one nobody has assessed, so
+        # re-running it over the same workspace is the last thing to do.
+        for judged_by in ("precondition", None):
+            with self.subTest(judged_by=judged_by):
+                go, why = D.should_recover({"judged_by": judged_by}, self.rec, 0, 1)
+                self.assertFalse(go)
+                self.assertIn("never judged by Jev", why)
 
     def test_the_budget_is_respected(self):
         go, why = D.should_recover({"judged_by": "jev"}, self.rec, 1, 1)

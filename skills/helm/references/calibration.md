@@ -19,7 +19,6 @@ traces to fit against, the honest posture is to prefer *less* automation, not mo
 | `HUMAN_GATE_NOUL` | 0.50 | Above: require explicit human approval |
 | `AUTO_MAX_BLAST_RADIUS` | 2.0 | Above: require explicit human approval |
 | `IRREVERSIBLE_NOUL` | 0.40 | Below: require explicit human approval |
-| `FALLBACK_CONFIDENCE_CAP` | 0.50 | Hard ceiling on any non-Jev verdict |
 
 ### Completion thresholds (`supervise.py`)
 
@@ -30,7 +29,6 @@ traces to fit against, the honest posture is to prefer *less* automation, not mo
 | `NEEDS_HUMAN_NOUL` | 0.50 | above: escalate |
 | `AWAITING_INPUT_NOUL` | 0.60 | above: the run is stuck, not working |
 | `MAX_FAILURE_SEVERITY` | 2.0 | above: warn the workspace may be dirty |
-| `FALLBACK_CONFIDENCE_CAP` | 0.50 | ceiling on any non-Jev verdict |
 | `STUCK_POLLS_BEFORE_KILL` | 3 | consecutive no-progress polls before aborting a `--watch` run |
 
 The asymmetry to preserve when tuning these: **wrongly reporting "done" is much more
@@ -38,10 +36,10 @@ expensive than one unnecessary review.** A false "done" means broken work is sil
 accepted and discovered later, out of context; a false "review" costs one glance at a log.
 Fit these for high recall on the not-actually-done cases.
 
-Note that `FALLBACK_CONFIDENCE_CAP` sits below `DONE_MIN_CONFIDENCE` in *both* files. That
-single inequality is what guarantees a degraded judge can never reach the automatic path,
-independently of the explicit `source != "jev"` checks. Two mechanisms enforce the same
-rule because it is the property least worth losing to a refactor.
+Both tables used to carry a `FALLBACK_CONFIDENCE_CAP` that held any non-Jev verdict below
+the accept thresholds. It is gone along with the scorer it existed to restrain: there is no
+second judge to cap, so every confidence in a trace is now Jev's own and comparable to
+every other. Rows written before the removal are not — see the note on `source` below.
 
 Gates are **conjunctive and fail-closed**: every one must pass for `mode: "auto"`. Any
 single unmet gate downgrades to `recommend`, and the unmet gates are printed so the user
@@ -69,8 +67,8 @@ same trace writer into it is the obvious next step before its thresholds can be 
 {
   "ts": "2026-09-20T14:22:05+0800",
   "intent": "add retry logic to the payment client",
-  "source": "jev",                    // or "fallback"
-  "model": "jev-1.13.0",              // null for fallback verdicts
+  "source": "jev",                    // always: Jev is the only judge
+  "model": "jev-1.13.0",              // the version the API says it ACTUALLY ran
   "routable": ["claude", "codex", "aider", "..."],
   "answers": { /* all seven raw answers with confidences */ },
   "route": { "mode": "recommend", "agent": "codex", "gates": [...], "signals": {...} },
@@ -81,6 +79,15 @@ same trace writer into it is the obvious next step before its thresholds can be 
 Recording the thresholds *inside each row* means a trace stays interpretable after the
 thresholds change. Without it, old rows silently become unanalysable the first time
 someone tunes a number.
+
+`source` is constant now that the deterministic fallback is gone, and it is kept for the
+same reason: rows written before the removal may carry `"fallback"`, and a fit that mixed
+those into a Jev population would be fitting two different judges as one. **Filter on
+`source == "jev"` before fitting anything.**
+
+`model` matters for the same reason at a finer grain. `model_requested` is our pin;
+`model` is what the API reports it resolved to. If they ever diverge, the alias moved and
+every threshold fitted against the old version is suspect.
 
 ## How to actually calibrate
 

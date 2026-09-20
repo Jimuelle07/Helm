@@ -9,7 +9,9 @@ without a machine probe or a network call.
 
 from __future__ import annotations
 
+import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -45,9 +47,9 @@ def agent(name, *, competence="does things", fit=None, ctx="medium",
 
 
 def verdict(agent_name="claude", *, confidence=0.9, blast=1.0, clarity=3.0,
-            breadth=1.0, needs_human=0.1, reversible=0.95, source="jev"):
+            breadth=1.0, needs_human=0.1, reversible=0.95):
     return {
-        "source": source,
+        "source": "jev",
         "answers": {
             "task_kind": {"choice": "feature", "confidence": 0.8},
             "agent": {"choice": agent_name, "confidence": confidence,
@@ -135,73 +137,85 @@ class TestAnswerSpaceIntegrity(unittest.TestCase):
         self.assertIn("none", route.build_agent_question([])["criteria"])
 
 
-class TestFallback(unittest.TestCase):
-    """A degraded judge may suggest, never act unattended."""
+class TestJevIsMandatory(unittest.TestCase):
+    """There is one judge. The tests that used to guard the fallback's ceiling
+    now guard the absence of a fallback: no scorer to demote, and no way to
+    reach a route without Jev having answered."""
 
-    def test_fallback_never_auto_executes(self):
-        r = route.compose(verdict(confidence=0.99, source="fallback"), ROUTABLE, "x")
-        self.assertNotEqual(r["mode"], "auto")
-        self.assertTrue(any("fallback" in g for g in r["gates"]))
+    def test_the_fallback_scorer_is_gone(self):
+        for name in ("fallback_verdict", "classify_kind", "estimate_clarity",
+                     "estimate_breadth", "KIND_PATTERNS", "CONTEXT_RANK"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(route, name),
+                                 f"route.{name} should not exist any more")
 
-    def test_fallback_confidence_is_capped(self):
-        r = route.compose(verdict(confidence=0.99, source="fallback"), ROUTABLE, "x")
-        self.assertLessEqual(r["signals"]["confidence"],
-                             route.THRESHOLDS["FALLBACK_CONFIDENCE_CAP"])
+    def test_no_confidence_cap_threshold_remains(self):
+        self.assertNotIn("FALLBACK_CONFIDENCE_CAP", route.THRESHOLDS)
 
-    def test_fallback_picks_only_from_routable(self):
-        v = route.fallback_verdict("fix the failing test", ROUTABLE, None)
-        self.assertIn(v["answers"]["agent"]["choice"], {a["name"] for a in ROUTABLE})
+    def test_every_route_is_attributed_to_jev(self):
+        for r in (route.compose(verdict(), ROUTABLE, "x"),
+                  route.compose(verdict("none"), ROUTABLE, "x")):
+            self.assertEqual(r["source"], "jev")
 
-    def test_fallback_probabilities_are_a_distribution(self):
-        v = route.fallback_verdict("add a feature", ROUTABLE, None)
-        probs = v["answers"]["agent"]["probabilities"]
-        self.assertAlmostEqual(sum(probs.values()), 1.0, places=2)
-        self.assertTrue(all(0.0 <= p <= 1.0 for p in probs.values()))
+    def test_no_gate_demotes_a_verdict_for_its_source(self):
+        # A clean, confident verdict routes on its merits. Previously a
+        # `source` check could veto this independently of every threshold.
+        r = route.compose(verdict(confidence=0.99), ROUTABLE, "x")
+        self.assertEqual(r["mode"], "auto")
+        self.assertEqual(r["gates"], [])
 
-    def test_fallback_handles_empty_agent_list(self):
-        v = route.fallback_verdict("anything", [], None)
-        self.assertIn("error", v)
+    def test_confidence_survives_intact(self):
+        r = route.compose(verdict(confidence=0.99), ROUTABLE, "x")
+        self.assertAlmostEqual(r["signals"]["confidence"], 0.99, places=3)
 
-    def test_clarity_rewards_concrete_referents_not_length(self):
-        clarify_at = route.THRESHOLDS["CLARIFY_MAX_SPEC_CLARITY"]
-        # Short but concrete: names a function and a file, so it is actionable.
-        self.assertGreater(
-            route.estimate_clarity("fix the off-by-one in parse_header in src/http/headers.py"),
-            clarify_at)
-        # Longer but vague: no referent to act on.
-        for vague in ("make it better", "add dark mode", "clean this up a bit please"):
-            with self.subTest(vague=vague):
-                self.assertLessEqual(route.estimate_clarity(vague), clarify_at)
+    def test_missing_key_is_a_hard_failure_not_a_degraded_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._with_no_key(tmp, self._assert_requires_key)
 
-    def test_clarity_stays_in_range(self):
-        for text in ("x", "make it better", "a " * 200,
-                     'rename Client to ApiClient in src/api.py so that "the name" matches'):
-            self.assertTrue(0.0 <= route.estimate_clarity(text) <= 3.0)
+    def _with_no_key(self, tmp, fn):
+        import keystore
+        old_path, old_env = keystore.CREDENTIALS_PATH, os.environ.pop("TYPESAFE_API_KEY", None)
+        keystore.CREDENTIALS_PATH = Path(tmp) / "credentials.json"
+        try:
+            fn()
+        finally:
+            keystore.CREDENTIALS_PATH = old_path
+            if old_env is not None:
+                os.environ["TYPESAFE_API_KEY"] = old_env
 
-    def test_context_penalty_does_not_swamp_a_specialist(self):
-        # A medium-context specialist with a clearly better task_fit should beat
-        # a large-context generalist on a narrow task. Rounding breadth to an
-        # integer rank used to lose this.
-        specialist = agent("copilot", ctx="medium", fit={**{k: 2 for k in route.TASK_KINDS},
-                                                         "review": 5})
-        generalist = agent("codex", ctx="large", fit={**{k: 2 for k in route.TASK_KINDS},
-                                                      "review": 4})
-        v = route.fallback_verdict("review the open pull request", [specialist, generalist], None)
-        self.assertEqual(v["answers"]["agent"]["choice"], "copilot")
+    def _assert_requires_key(self):
+        import keystore
+        with self.assertRaises(keystore.MissingAPIKey) as ctx:
+            keystore.require_api_key()
+        # The message has to tell the user what to actually do about it.
+        self.assertIn("--set-api-key", str(ctx.exception))
 
-    def test_classify_kind(self):
-        cases = {
-            "fix the failing test in parser.py": "test",
-            "the login button crashes on submit": "bugfix",
-            "rename Client to ApiClient everywhere": "refactor",
-            "update the README install steps": "docs",
-            "set up a new service from scratch": "scaffold",
-            "add dark mode support": "feature",
-            "write a github actions deploy pipeline": "ops",
-        }
-        for text, expected in cases.items():
-            with self.subTest(text=text):
-                self.assertEqual(route.classify_kind(text), expected)
+
+class TestRouteCliFailsFast(unittest.TestCase):
+    """`route.py` must exit before it probes, not route on a guess."""
+
+    def test_exits_with_a_setup_message_and_no_route(self):
+        import keystore
+        with tempfile.TemporaryDirectory() as tmp:
+            old_path = keystore.CREDENTIALS_PATH
+            old_env = os.environ.pop("TYPESAFE_API_KEY", None)
+            keystore.CREDENTIALS_PATH = Path(tmp) / "credentials.json"
+            argv, stderr = sys.argv, sys.stderr
+            sys.argv = ["route.py", "add a feature"]
+            sys.stderr = io.StringIO()
+            try:
+                rc = route.main()
+                err = sys.stderr.getvalue()
+            finally:
+                sys.argv, sys.stderr = argv, stderr
+                keystore.CREDENTIALS_PATH = old_path
+                if old_env is not None:
+                    os.environ["TYPESAFE_API_KEY"] = old_env
+
+        self.assertEqual(rc, 2)
+        self.assertIn("--set-api-key", err)
+        self.assertNotIn("RECOMMEND", err)
+        self.assertNotIn("ROUTE", err)
 
 
 class TestCommandRendering(unittest.TestCase):

@@ -8,9 +8,9 @@ plus:
 
 These exist because the wire format was inferred for most of this project's
 life and the honest thing was to label it unverified. It is verified now, and
-these tests are what keep that claim true: they are the contract, and if
-TypeSafe changes the API they fail here rather than silently degrading every
-routing decision to the fallback scorer.
+these tests are what keep that claim true: they are the contract, and since
+Jev is the only judge Helm has, a change to that contract takes the whole
+tool down rather than quietly weakening it. Better to fail here.
 
 A full run costs well under a cent.
 """

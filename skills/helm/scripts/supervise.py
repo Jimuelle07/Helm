@@ -22,6 +22,11 @@ full log on disk if it ever genuinely needs to look.
 That is the whole trade: the transcript hits the cheap judge and the disk, and
 the expensive model sees only the conclusion.
 
+Jev is required, not preferred. If it cannot answer, this module reports an
+unjudged run and escalates -- it never substitutes a keyword scan over the
+transcript, because the failures worth catching are exactly the ones such a
+scan cannot see.
+
 Why not just check the exit code
 --------------------------------
 Because it lies in both directions, and the interesting failures are the ones
@@ -50,6 +55,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import dispatch  # noqa: E402
 import jev  # noqa: E402
+import keystore  # noqa: E402
 import probe  # noqa: E402
 
 RUN_DIR = Path(
@@ -141,7 +147,6 @@ THRESHOLDS = {
     "NEEDS_HUMAN_NOUL":       0.50,  # above -> escalate
     "AWAITING_INPUT_NOUL":    0.60,  # above -> the run is stuck, not working
     "MAX_FAILURE_SEVERITY":   2.0,   # above -> warn the workspace may be dirty
-    "FALLBACK_CONFIDENCE_CAP": 0.50,  # ceiling on any non-Jev verdict
     "STUCK_POLLS_BEFORE_KILL": 3,    # consecutive no-progress polls before aborting
 }
 
@@ -307,89 +312,24 @@ def build_state(task: str, agent_name: str, output: str, rc: int | None,
 
 def judge(task: str, agent_name: str, output: str, rc: int | None,
           elapsed: float, timed_out: bool) -> dict:
-    state = build_state(task, agent_name, output, rc, elapsed, timed_out)
-    try:
-        resp = jev.ask(state, completion_questions())
-        resp["source"] = "jev"
-        return resp
-    except jev.JevUnavailable as exc:
-        v = fallback_judge(output, rc, timed_out)
-        v["fallback_reason"] = str(exc)
-        return v
+    """Ask Jev whether the worker finished. Raises jev.JevUnavailable if it cannot.
 
-
-# Phrases that mean an agent stopped to ask something. Crude next to Jev --
-# literal substring checks against phrasing that varies by model and by mood --
-# but they catch the loudest cases, and everything they produce is
-# confidence-capped.
-ASKING_MARKERS = (
-    "would you like me to", "shall i proceed", "should i go ahead",
-    "let me know if you", "here's what i would", "here is what i would",
-    "i can help you with", "to proceed, please", "waiting for your",
-    "do you want me to", "please confirm", "awaiting your",
-)
-FAILURE_MARKERS = (
-    "traceback (most recent call last)", "fatal error", "command not found",
-    "permission denied", "authentication failed", "not logged in",
-    "rate limit", "quota exceeded", "unauthorized", "invalid api key",
-)
-
-
-def fallback_judge(output: str, rc: int | None, timed_out: bool) -> dict:
-    """Heuristic completion check for when Jev is unavailable.
-
-    Confidence is hard-capped so a degraded judge can report but never assert.
-    That cap, not any single rule here, is what routes every fallback verdict
-    to "review" -- the same mechanism route.py uses to keep a degraded judge
-    out of the automatic path.
-
-    Note what this deliberately does NOT try to detect: `no_op`, an agent that
-    described the work instead of doing it. Telling those apart requires
-    reading for meaning, which is the whole reason Jev is worth calling. An
-    earlier draft guessed at it from output length and misjudged a terse but
-    genuinely successful run as a no-op -- which maps to `retry`, so it would
-    have re-run work that had already succeeded. A fallback that cannot tell
-    should say so rather than invent a confident category.
+    Deliberately has no except clause. "Did this agent do the work?" is a
+    reading-for-meaning question -- the one thing an exit code and a keyword
+    scan are structurally unable to answer -- so an unreachable Jev leaves the
+    run genuinely unjudged, and saying so is the only honest option.
     """
-    clean = probe.strip_ansi(output)
-    tail = clean[-4000:].lower()
-
-    if timed_out:
-        status, satisfied = "partial", 0.2
-    elif any(m in tail for m in FAILURE_MARKERS) or (rc not in (0, None)):
-        status, satisfied = "failed", 0.1
-    elif any(m in tail for m in ASKING_MARKERS):
-        status, satisfied = "blocked_needs_input", 0.2
-    elif len(clean.strip()) < 10:
-        # Exited cleanly having emitted essentially nothing. Odd, but not
-        # evidence of a no-op -- just a reason not to vouch for it.
-        status, satisfied = "completed", 0.25
-    else:
-        status, satisfied = "completed", 0.7
-
-    return {
-        "source": "fallback",
-        "answers": {
-            "status": {"choice": status,
-                       "confidence": THRESHOLDS["FALLBACK_CONFIDENCE_CAP"]},
-            "task_satisfied": {"noul": satisfied},
-            "needs_human": {"noul": 0.7 if status in ("failed", "blocked_needs_input") else 0.3},
-            "awaiting_input": {"noul": 0.75 if status == "blocked_needs_input" else 0.15},
-            "failure_severity": {"score": 2.5 if status == "failed" else 0.5,
-                                 "confidence": 0.3},
-        },
-    }
+    state = build_state(task, agent_name, output, rc, elapsed, timed_out)
+    resp = jev.ask(state, completion_questions())
+    resp["source"] = "jev"
+    return resp
 
 
 def compose(verdict: dict, rc: int | None, elapsed: float, timed_out: bool,
             agent_name: str, log_path: Path, output: str) -> dict:
     """Pure. Verdict -> the small object the orchestrator actually reads."""
-    source = verdict.get("source", "jev")
     status = jev.answer_choice(verdict, "status", "completed")
     confidence = jev.answer(verdict, "status", "confidence")
-    if source != "jev":
-        confidence = min(confidence, THRESHOLDS["FALLBACK_CONFIDENCE_CAP"])
-
     satisfied = jev.answer(verdict, "task_satisfied", "noul", 0.5)
     needs_human = jev.answer(verdict, "needs_human", "noul", 0.5)
     awaiting = jev.answer(verdict, "awaiting_input", "noul", 0.0)
@@ -425,8 +365,6 @@ def compose(verdict: dict, rc: int | None, elapsed: float, timed_out: bool,
         notes.append("judged as needing a human look")
     if severity > THRESHOLDS["MAX_FAILURE_SEVERITY"]:
         notes.append(f"workspace may be dirty (failure severity {severity:.1f}) -- check git status")
-    if source != "jev":
-        notes.append("judged by the heuristic fallback, not Jev -- treat as a weak signal")
 
     return {
         "outcome": outcome,
@@ -444,7 +382,7 @@ def compose(verdict: dict, rc: int | None, elapsed: float, timed_out: bool,
         },
         "notes": notes,
         "headline": _headline(output),
-        "judged_by": source,
+        "judged_by": "jev",
         # The orchestrator reads this path only if it decides it must. That
         # choice -- rather than the transcript arriving unbidden in context --
         # is where the token saving actually comes from.
@@ -478,6 +416,14 @@ def supervise(agent_name: str, task: str, cwd: Path, timeout: float,
     behaviour exactly, which is deliberate. Nothing here should widen an
     agent's permissions on the strength of a metric nobody supplied.
     """
+    # Checked before the card, before the plan, before anything is spawned.
+    # Dispatching a worker we have no way to judge would spend the user's time
+    # and tokens to produce an unusable result.
+    try:
+        keystore.require_api_key()
+    except keystore.MissingAPIKey as exc:
+        return _error(agent_name, str(exc))
+
     agents = {a["name"]: a for a in registry["agents"]}
     card = agents.get(agent_name)
     if not card:
@@ -581,18 +527,31 @@ def _dispatch_once(card: dict, agent_name: str, task: str,
     run = Run(argv, cwd, log_path)
     run.start()
 
-    if watch:
-        rc, timed_out = _watch_loop(run, plan.prompt, agent_name, timeout, poll_interval)
-    else:
-        rc = run.wait(timeout)
-        timed_out = rc is None
+    try:
+        if watch:
+            rc, timed_out = _watch_loop(run, plan.prompt, agent_name, timeout,
+                                        poll_interval)
+        else:
+            rc = run.wait(timeout)
+            timed_out = rc is None
 
-    output = run.text()
-    # Judged against the *original* task, not the prompt we decorated it with.
-    # The recovery prefix is an instruction to the worker, and feeding it to
-    # the judge as well would have Jev grading the agent on our scaffolding
-    # rather than on what the user actually asked for.
-    j = judge(task, agent_name, output, rc, run.elapsed(), timed_out)
+        output = run.text()
+        # Judged against the *original* task, not the prompt we decorated it
+        # with. The recovery prefix is an instruction to the worker, and
+        # feeding it to the judge as well would have Jev grading the agent on
+        # our scaffolding rather than on what the user actually asked for.
+        j = judge(task, agent_name, output, rc, run.elapsed(), timed_out)
+    except jev.JevUnavailable as exc:
+        # The work may well be done -- we simply have no verdict on it, and
+        # inventing one from the exit code is the guess this skill does not
+        # make. Hand back the transcript and escalate.
+        run.terminate()
+        return _error(
+            agent_name,
+            f"the agent ran but Jev could not judge the result ({exc}) -- "
+            f"the workspace may have been modified; read the transcript",
+            log_path=log_path, status="unjudged",
+            rc=run.poll(), elapsed=run.elapsed())
     return compose(j, rc, run.elapsed(), timed_out, agent_name, log_path, output)
 
 
@@ -629,6 +588,10 @@ def _watch_loop(run: Run, task: str, agent_name: str, timeout: float,
     clarifying question and then waits. Nothing is coming. Without this it
     burns the full timeout before anyone notices; with it, Jev spots the
     waiting-for-input shape on the next poll and we stop in seconds.
+
+    Every poll is a Jev judgement -- "is this making progress?" is no more
+    answerable from byte counts than "is this finished?" is from an exit code.
+    A jev.JevUnavailable therefore ends the watch rather than downgrading it.
     """
     deadline = time.time() + timeout
     stuck_polls = 0
@@ -643,30 +606,20 @@ def _watch_loop(run: Run, task: str, agent_name: str, timeout: float,
         time.sleep(min(interval, max(0.0, deadline - time.time())))
         output = run.text()
 
-        # Cheap local check first -- no point paying for a judgement when the
-        # output has not changed at all since the last poll.
+        # Whether the transcript grew is an observation, not a judgement, so
+        # it goes into state as evidence rather than being used to skip the
+        # poll: a stalled agent and a thinking one both emit nothing.
         grew = len(output) > last_len
         last_len = len(output)
 
-        if not jev.available():
-            if not grew:
-                stuck_polls += 1
-                if stuck_polls >= THRESHOLDS["STUCK_POLLS_BEFORE_KILL"]:
-                    run.terminate()
-                    run.finished = time.time()
-                    return run.poll(), True
-            else:
-                stuck_polls = 0
-            continue
-
-        try:
-            resp = jev.ask(
-                {"assigned_task": task, "agent": agent_name,
-                 "output_excerpt": excerpt(output), "still_running": True,
-                 "output_grew_since_last_poll": grew},
-                progress_questions())
-        except jev.JevUnavailable:
-            continue
+        # No try/except: an outage here propagates to _dispatch_once, which
+        # stops the run and escalates. Swallowing it would leave the caller
+        # believing a run was being supervised while nothing was watching.
+        resp = jev.ask(
+            {"assigned_task": task, "agent": agent_name,
+             "output_excerpt": excerpt(output), "still_running": True,
+             "output_grew_since_last_poll": grew},
+            progress_questions())
 
         if jev.answer(resp, "awaiting_input", "noul") > THRESHOLDS["AWAITING_INPUT_NOUL"]:
             run.terminate()
@@ -687,12 +640,21 @@ def _watch_loop(run: Run, task: str, agent_name: str, timeout: float,
     return run.poll(), True
 
 
-def _error(agent_name: str, message: str) -> dict:
+def _error(agent_name: str, message: str, log_path: Path | None = None,
+           status: str = "not_started", rc: int | None = None,
+           elapsed: float = 0.0) -> dict:
+    """A verdict for something that went wrong before or around the judgement.
+
+    `log_path` matters on the Jev-unreachable path: the agent really did run,
+    and the transcript is the only thing left to go on, so the caller has to be
+    told where it is rather than being handed an outcome with no evidence.
+    """
     return {
-        "outcome": "error", "next": "escalate", "status": "not_started",
-        "agent": agent_name, "exit_code": None, "elapsed_s": 0.0,
+        "outcome": "error", "next": "escalate", "status": status,
+        "agent": agent_name, "exit_code": rc, "elapsed_s": round(elapsed, 1),
         "signals": {}, "notes": [message], "headline": message,
-        "judged_by": "precondition", "log": None,
+        "judged_by": "precondition",
+        "log": str(log_path) if log_path else None,
     }
 
 
@@ -764,7 +726,11 @@ def _load_signals(inline: str | None, path: str | None) -> dict | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Dispatch a task to an agent and let Jev judge completion.",
+        description="Dispatch a task to an agent and let Jev judge completion. "
+                    "Requires a TypeSafe API key -- Jev is the judge, so a run "
+                    "it cannot see is a run this tool will not start.",
+        epilog="exit codes: 0 done/uncertain | 1 needs attention | 2 no API key "
+               "(route.py --set-api-key)",
         allow_abbrev=False)
     ap.add_argument("agent", help="agent name, e.g. codex (see probe.py)")
     ap.add_argument("task", help="the task to hand to that agent")
@@ -793,6 +759,12 @@ def main() -> int:
         signals = _load_signals(args.signals, args.signals_file)
     except (OSError, ValueError) as exc:
         ap.error(f"could not read --signals: {exc}")
+
+    try:
+        keystore.require_api_key()
+    except keystore.MissingAPIKey as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     cwd = Path(args.repo).resolve()
     registry = probe.load_cached(False, None, want_version=True)

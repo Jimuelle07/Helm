@@ -4,7 +4,13 @@ A complete run-through with real output. Every block below is copied from an act
 session on a Windows 11 machine with seven agent CLIs installed — including the parts
 that went wrong, because those are the ones worth seeing.
 
-Total time: about five minutes. Total API cost: under a cent.
+You will watch Helm inventory the machine (§1), then hand every judgement in the loop to
+TypeSafe Jev: which agent should take the task (§4), which flags it should run with (§5),
+and whether it actually finished (§5–6). Note the costs as they go by — the whole
+walkthrough, routing and completion-judging included, runs for **under a cent**. That
+price is the reason orchestration can afford to ask before every task rather than guess.
+
+Total time: about five minutes.
 
 ---
 
@@ -63,11 +69,15 @@ ROUTABLE AGENTS (7)
 
 NOT INSTALLED (6): amp, crush, droid, goose, ollama, qwen
 
-DECISION LAYER
-  Jev: no API key configured -- route.py will use the deterministic
-       fallback scorer and cap its confidence at 0.5 (recommend-only)
+DECISION LAYER (required)
+  Jev: NO API KEY -- route.py and supervise.py will not run.
+       Helm probes the machine, Jev decides what to do with it;
+       there is no second scorer behind it.
        Set one with:  python probe.py --set-api-key apikey_...
 ```
+
+Note the exit code: `2`, not `0`. The inventory still prints — that is exactly what you
+need to see while setting up — but nothing downstream will run until §2 is done.
 
 First run takes ~12 seconds because it runs every CLI's `--version` and auth check in
 parallel. It then caches for 24 hours; subsequent runs are **0.4 seconds**.
@@ -87,20 +97,21 @@ three don't. Unverified never blocks — see §3.
 
 ---
 
-## 2. Turn on Jev
+## 2. Configure Jev — this is required
 
-Everything above works with no API key. Routing just falls back to a heuristic scorer whose
-confidence is capped at 0.5, which sits below every accept threshold — so it can recommend
-but never auto-execute.
+§1 is the only part that works without a key, and even it exits non-zero. Jev is the
+decision layer: the probe observes, Jev judges, the chosen agent generates. Remove the
+middle term and there is no routing decision to make, so `route.py` exits with setup
+instructions rather than producing something weaker that looks like an answer.
 
-To get real judgement, add **your own** TypeSafe key (the skill ships without one; each
-person uses their own account):
+Add **your own** TypeSafe key (the skill ships without one; each person uses their own
+account):
 
 ```bash
 $ python scripts/route.py --set-api-key apikey_2272292763ff07842bf8e1...
 
 Stored TypeSafe API key (apike...bf32) at ~/.cache/helm/credentials.json
-Jev is now available. Run probe.py to confirm.
+Helm's decision layer is configured. Confirm it works with: python probe.py --check-jev
 ```
 
 Confirm it actually works, with one live request:
@@ -118,6 +129,23 @@ Jev OK -- Jev answered
 This sends a real inference request rather than just listing models, because a key can be
 valid for listing and still fail at inference — and the failure that matters is the one
 that happens at routing time.
+
+### What it looks like when you skip this
+
+```bash
+$ python scripts/route.py "fix the failing test in src/parser.py"
+
+No TypeSafe API key configured -- Jev is Helm's decision layer and is required.
+  fix: python route.py --set-api-key apikey_...
+       (or export TYPESAFE_API_KEY=apikey_... for this session)
+  Get a key at https://typesafe.ai -- then verify with: python probe.py --check-jev
+$ echo $?
+2
+```
+
+No probe runs, no partial answer, no recommendation you might mistake for a judged one.
+A bad key fails the same way a little later, with exit `4` and the API's own error text —
+the check happens before the probe, the network call after it.
 
 ---
 
@@ -143,10 +171,10 @@ stale right after telling someone to go log in is the worst possible moment for 
 | No credential found in env or config | We couldn't see one | **No** |
 | The tool's own status command says logged out | Authoritative | **Yes** |
 
-On this machine the heuristic reported "no credentials detected" for `cursor-agent`, while
-`cursor-agent status` reported a live session. Tokens live in OS keychains and browser
-sessions no probe can enumerate. Had the heuristic been allowed to gate, a perfectly good
-agent would have silently vanished from the answer space.
+On this machine the file-and-env scan reported "no credentials detected" for
+`cursor-agent`, while `cursor-agent status` reported a live session. Tokens live in OS
+keychains and browser sessions no probe can enumerate. Had that scan been allowed to gate,
+a perfectly good agent would have silently vanished from the answer space.
 
 ---
 
@@ -202,9 +230,10 @@ ROUTE -> Aider (aider)
 `ROUTE`, not `RECOMMEND` — this is `auto` mode. Confidence 1.0, blast 0.0 ("docs only"),
 breadth 0.0 ("one file"). Every gate passes.
 
-Worth noting: the heuristic fallback can *never* produce this, because its 0.5 confidence
-cap sits below the 0.75 accept threshold by construction. Auto mode is only reachable with
-Jev. And the auth caveat shows up without blocking — the faultline again.
+Confidence 1.0 here is Jev reporting that the choice is not close, which is the opposite
+of the §4 near-tie above — and worth contrasting, because it is the same threshold doing
+the work in both directions. The auth caveat shows up without blocking: the faultline
+again.
 
 ---
 
@@ -381,8 +410,9 @@ DONE -- claude (completed)
 
 Aider gets `/undo` run against it first, because it auto-commits and the failed attempt is
 already in the history. A `timeout` never retries — the tree may be half-modified. Neither
-does a verdict from the heuristic fallback, which cannot tell a terse success from a no-op
-and would happily re-run work that had already finished.
+does an **unjudged** run: if Jev went down after the agent finished, nobody knows what it
+did to the workspace, and re-running it blind is how one bad run becomes two. That verdict
+comes back as `error` / `next: escalate` with the transcript path attached.
 
 See `references/dispatch-modes.md` for the rule table and the card schema.
 
@@ -427,9 +457,9 @@ Two things the demo above should make concrete:
 - **Make sure `argv` can actually write.** Most agent CLIs default to prompting or a
   read-only sandbox in headless mode, which produces the silent no-op from §5. Check for a
   `--yes` / `--auto` / `--sandbox` / `--permission-mode` flag and include it.
-- **`argv` must work with `{flags}` expanding to nothing.** The base contract is the
-  fallback for every task that carries no metrics, so it has to be a complete, runnable,
-  headless invocation on its own. `modes` only ever *adds* to it.
+- **`argv` must work with `{flags}` expanding to nothing.** The base contract is what runs
+  for any task that carries no metrics, so it has to be a complete, runnable, headless
+  invocation on its own. `modes` only ever *adds* to it.
 - **Set `verified` honestly on every mode.** A wrong prompt prefix costs some quality; a
   wrong flag costs the entire run. If you cannot check it against `--help`, prefer a
   `prompt_prefix` or leave the mode out — `unavailable: sandbox` is a useful signal, and a
@@ -485,8 +515,19 @@ go to your temp directory. Override any of it with `HELM_CREDENTIALS`,
 
 ## 9. What to expect to go wrong
 
-**Everything says `judged by: fallback`.** No key, or the key is bad. Run
-`probe.py --check-jev` for the actual reason.
+**`No TypeSafe API key configured` (exit 2).** Helm has no decision layer. Run
+`route.py --set-api-key apikey_...`, then `probe.py --check-jev` to confirm. There is no
+degraded mode to fall back on and this is deliberate — see `jev-decision-layer.md`, "Why
+there is no fallback".
+
+**`Jev could not answer` (exit 4).** The key is present but the API rejected it or could
+not be reached; the message carries the API's own error text. `probe.py --check-jev` names
+the failing stage.
+
+**A run came back `error` with "the agent ran but Jev could not judge the result".** The
+agent really did execute and the workspace may have been modified — Helm simply has no
+verdict on it. Read the transcript at the path in the output and check `git status`. Do not
+re-dispatch blind.
 
 **An agent you have isn't listed.** Either there is no card for it (§6), or the binary isn't
 on `PATH`. The probe resolves real files only — a `PATH` entry pointing at a deleted

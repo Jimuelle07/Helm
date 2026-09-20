@@ -238,13 +238,14 @@ Three conditions, all required:
 
 1. The outcome is in `dispatch.RECOVERABLE` — `no_op`, `stuck`, or `failed`.
 2. The card declares a cure for that outcome.
-3. **The verdict came from Jev, not the heuristic fallback.**
+3. **The run was actually judged by Jev.**
 
-The third is the one worth arguing about. Re-dispatching is an *action*, and this
-codebase's standing rule is that a degraded judge may report but never act. The fallback
-cannot tell a terse success from a no-op — it says so in its own docstring — so letting it
-trigger a retry would re-run work that had already succeeded. The verdict then carries
-`not retrying: verdict came from the fallback judge -- too weak to act on`.
+The third is the one worth arguing about. Re-dispatching is an *action*, and only a Jev
+verdict describes a run well enough to justify one. A verdict carrying `judged_by` anything
+other than `jev` — a failed precondition, or a Jev outage that struck after the agent had
+already run — is a run nobody has assessed, which is the worst possible basis for running
+it again over the same workspace. The verdict then carries
+`not retrying: the run was never judged by Jev -- nothing to act on`.
 
 `timeout` is deliberately **not** recoverable. A killed run may have left the tree
 half-modified, and re-dispatching onto unknown partial state turns one bad run into two.

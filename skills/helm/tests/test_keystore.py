@@ -84,6 +84,40 @@ class TestRoundTrip(KeystoreTestCase):
         self.assertEqual(keystore._read()["typesafe_api_key"], "sk-abc123")
 
 
+class TestRequireApiKey(KeystoreTestCase):
+    """The gate every entry point stands behind. A missing key is a stop, not
+    a downgrade, so the only acceptable outcomes are "the key" or "raise"."""
+
+    def test_raises_when_nothing_is_configured(self):
+        with self.assertRaises(keystore.MissingAPIKey):
+            keystore.require_api_key()
+
+    def test_returns_the_stored_key(self):
+        keystore.set_api_key("apikey_x_y")
+        self.assertEqual(keystore.require_api_key(), "apikey_x_y")
+
+    def test_returns_the_env_key(self):
+        os.environ["TYPESAFE_API_KEY"] = "apikey_env"
+        self.assertEqual(keystore.require_api_key(), "apikey_env")
+
+    def test_the_error_tells_the_user_what_to_run(self):
+        with self.assertRaises(keystore.MissingAPIKey) as ctx:
+            keystore.require_api_key()
+        msg = str(ctx.exception)
+        self.assertIn("--set-api-key", msg)
+        self.assertIn("TYPESAFE_API_KEY", msg)
+
+    def test_the_setup_hint_is_the_one_shared_wording(self):
+        # probe.py, route.py and supervise.py all print this. If they drift,
+        # the same failure starts giving three different instructions.
+        with self.assertRaises(keystore.MissingAPIKey) as ctx:
+            keystore.require_api_key()
+        self.assertEqual(str(ctx.exception), keystore.SETUP_HINT)
+
+    def test_it_never_leaks_the_key_into_the_hint(self):
+        self.assertNotIn("apikey_", keystore.SETUP_HINT.split("fix:")[0])
+
+
 class TestPrecedence(KeystoreTestCase):
     def test_env_var_wins_over_stored(self):
         keystore.set_api_key("sk-stored")

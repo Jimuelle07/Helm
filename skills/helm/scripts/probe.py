@@ -4,7 +4,12 @@
 Emits a JSON capability registry: hardware, installed coding-agent CLIs, their
 declared competences, and their auth readiness. This is the "observe" layer --
 it answers "what tools exist here?" so that no agent has to discover its
-siblings by trial and error.
+siblings by trial and error. It does not decide anything: the registry it
+emits is the state Jev is handed, and Jev is what turns it into a decision.
+
+Because nothing downstream runs without Jev, this exits non-zero when no
+TypeSafe key is configured -- after printing the summary, which is precisely
+what a half-configured machine needs to show you.
 
 Usage:
     python probe.py                 # human-readable summary
@@ -592,7 +597,12 @@ def build_registry(repo_root: Path | None = None, want_version: bool = True,
 
 def probe_jev() -> dict:
     """Never cached: a key set with --set-api-key must take effect immediately,
-    not after the 24h registry cache expires. Cheap to recompute either way."""
+    not after the 24h registry cache expires. Cheap to recompute either way.
+
+    Reported rather than enforced here. probe.py's job is to observe, and a
+    machine summary is exactly what someone needs to see while they are still
+    setting Helm up -- so the summary always prints, and the missing key is
+    surfaced as the blocking condition it is in the exit code."""
     key = keystore.get_api_key()
     return {
         "api_key_present": bool(key),
@@ -741,13 +751,15 @@ def summarize(reg: dict) -> str:
 
     jev = reg["jev"]
     lines.append("")
-    lines.append("DECISION LAYER")
+    lines.append("DECISION LAYER (required)")
     if jev["api_key_present"]:
         src = "TYPESAFE_API_KEY env var" if jev["api_key_source"] == "env" else "locally stored key"
-        lines.append(f"  Jev: API key found ({src}) -- judgement available")
+        lines.append(f"  Jev: API key found ({src}) -- ready to judge")
+        lines.append("       Verify it actually works:  python probe.py --check-jev")
     else:
-        lines.append("  Jev: no API key configured -- route.py will use the deterministic")
-        lines.append("       fallback scorer and cap its confidence at 0.5 (recommend-only)")
+        lines.append("  Jev: NO API KEY -- route.py and supervise.py will not run.")
+        lines.append("       Helm probes the machine, Jev decides what to do with it;")
+        lines.append("       there is no second scorer behind it.")
         lines.append("       Set one with:  python probe.py --set-api-key apikey_...")
 
     if reg.get("repo"):
@@ -780,7 +792,9 @@ def main() -> int:
                     help="skip asking each CLI whether it is logged in (faster, "
                          "but unauthenticated agents will not be filtered out)")
     ap.add_argument("--check-jev", action="store_true",
-                    help="make one live Jev request to confirm the API key works, then exit")
+                    help="verify the required decision layer: make one live Jev "
+                         "request to confirm the key works, then exit (0 = Helm "
+                         "can route, 1 = it cannot)")
     keystore.add_key_args(ap)
     args = ap.parse_args()
 
@@ -804,9 +818,9 @@ def main() -> int:
             print(f"  usage           : {u.get('input_tokens')} in / "
                   f"{u.get('output_tokens')} out  (~${cost:.7f})")
             return 0
-        print(f"Jev NOT working ({result['stage']}): {result['detail']}", file=sys.stderr)
-        if result["stage"] == "key":
-            print("  fix: python probe.py --set-api-key apikey_...", file=sys.stderr)
+        print(f"Jev NOT working ({result['stage']}): {result['detail']}",
+              file=sys.stderr)
+        print("  Helm cannot route or supervise until this is fixed.", file=sys.stderr)
         return 1
 
     repo_root = Path(args.repo).resolve() if args.repo else None
@@ -818,6 +832,14 @@ def main() -> int:
         sys.stdout.write("\n")
     else:
         print(summarize(reg))
+
+    # The registry still printed: someone mid-setup needs to see what this
+    # machine has. But a registry nothing can judge is not a working Helm, so
+    # the exit code says so and any script chaining probe into route stops here.
+    if not reg["jev"]["api_key_present"]:
+        print("", file=sys.stderr)
+        print(keystore.SETUP_HINT, file=sys.stderr)
+        return 2
     return 0
 
 

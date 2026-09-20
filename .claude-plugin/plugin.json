@@ -1,3 +1,21 @@
 {
-  "name": "jev-harness"
+  "name": "helm",
+  "displayName": "Helm",
+  "version": "0.1.0",
+  "description": "Steering and control for the coding agents already on your machine. Probes which agent CLIs are installed and logged in, routes each task to the best one with TypeSafe Jev, dispatches it, and judges whether the work actually got done.",
+  "author": {
+    "name": "Jimuelle07",
+    "url": "https://github.com/Jimuelle07"
+  },
+  "homepage": "https://github.com/Jimuelle07/Helm",
+  "repository": "https://github.com/Jimuelle07/Helm",
+  "license": "MIT",
+  "keywords": [
+    "agent-orchestration",
+    "routing",
+    "coding-agents",
+    "typesafe",
+    "jev",
+    "cli"
+  ]
 }

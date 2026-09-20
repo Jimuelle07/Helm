@@ -46,8 +46,9 @@ agent in `scripts/cards/`, named after the agent.
 }
 ```
 
-`task_fit` must contain all ten kinds — a test enforces this, because a missing key
-silently defaults the agent to mediocre in the fallback scorer rather than failing loudly.
+`task_fit` must contain all ten kinds — a test enforces this. It is not read at routing
+time (Jev judges fit from the `competence` line), but it is the card author's own statement
+of intent, and a missing kind is far more often an oversight than a deliberate zero.
 
 ## Writing a good `competence` line
 
@@ -76,10 +77,10 @@ work than any of its strengths.
 
 ## `context_class`
 
-Rough size of job the agent comfortably holds at once. The fallback scorer penalises an
-agent whose class is *smaller* than the task needs much more heavily than one that is
-larger, because being under-resourced fails the task while being over-resourced merely
-costs more.
+Rough size of job the agent comfortably holds at once. It is sent to Jev as part of each
+agent's entry in `state`, alongside the `competence` line, so it can be weighed against
+`context_breadth` — an agent whose class is *smaller* than the task needs will fail it,
+while one that is larger merely costs more.
 
 | Class | Fits |
 |---|---|

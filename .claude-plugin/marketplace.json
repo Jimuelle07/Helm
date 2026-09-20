@@ -1,0 +1,24 @@
+{
+  "name": "helm",
+  "description": "Helm: steering and control for the coding agents already on your machine.",
+  "owner": {
+    "name": "Jimuelle07",
+    "url": "https://github.com/Jimuelle07"
+  },
+  "plugins": [
+    {
+      "name": "helm",
+      "displayName": "Helm",
+      "description": "Probes which coding-agent CLIs are installed and authenticated, routes each task to the best one with TypeSafe Jev, dispatches it, and judges whether the worker finished.",
+      "version": "0.1.0",
+      "source": "./",
+      "keywords": [
+        "agent-orchestration",
+        "routing",
+        "coding-agents",
+        "typesafe",
+        "jev"
+      ]
+    }
+  ]
+}

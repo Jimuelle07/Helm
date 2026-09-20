@@ -3,8 +3,8 @@ name: helm
 description: >
   Discovers which coding-agent CLIs are actually installed AND logged in on this machine
   (Claude Code, Codex, Cursor Agent, Gemini, Aider, OpenCode, Copilot, Ollama and others)
-  along with its CPU/RAM/VRAM, then uses TypeSafe Jev as a typed decision layer to pick the
-  best available agent, dispatch the task, and judge whether the worker actually finished.
+  along with its CPU/RAM/VRAM, then uses TypeSafe Jev — its required typed decision layer —
+  to pick the best available agent, dispatch the task, and judge whether the worker finished.
   Use this whenever the user asks which model or agent should handle something, wants to
   delegate or route work to another CLI agent, asks what agents or models are available on
   their machine, compares agents ("is Claude or Codex better for this refactor?"), asks
@@ -20,6 +20,12 @@ description: >
 # Helm
 
 *Taking the helm of the agents already on your machine.*
+
+Helm is an orchestration harness: it inventories the coding agents installed on this
+machine (`probe.py`), routes a task to the best one (`route.py`), dispatches it and judges
+whether the work actually got done (`supervise.py`). The routing and the judging are done
+by **TypeSafe Jev**, a typed decision model — that is what lets the orchestration run on
+every task instead of only the expensive ones.
 
 ## Why this exists
 
@@ -44,15 +50,38 @@ installed agents, so recommending something that is not on the machine is **stru
 impossible**, not merely unlikely. That is the whole reason to use a typed decision model
 here instead of asking an LLM to please only suggest installed tools.
 
-## Setting up Jev (once per user)
+### What Jev costs, and why that matters to you
+
+One routing call is **seven questions in a single request**, answered independently and in
+parallel: `agent`, `task_kind`, `blast_radius`, `spec_clarity`, `context_breadth`,
+`needs_human`, `reversible`. Measured: **0.7 s, 2,149 input tokens, $0.00009** — input is
+$0.042 per million tokens and output is billed at zero.
+
+Two consequences worth internalising:
+
+- **Run it freely.** `route.py` is cheap enough to call before any substantial build, not
+  just the ones that look hard. You do not need to ration it or decide in advance whether a
+  task "deserves" routing.
+- **Never read a worker transcript yourself.** Judging completion is the expensive part of
+  orchestration: a 50k-token transcript costs real money to read and permanently fills your
+  context with build noise you carry for the rest of the session. `supervise.py` sends it to
+  Jev for about a fifth of a cent and hands you a few hundred bytes — outcome, confidence,
+  what to do next, and a path to the log if you ever genuinely need it. Open that log only
+  when the verdict tells you to.
+
+## Setting up Jev (required, once per user)
+
+Jev is the decision layer, so this is a prerequisite, not an enhancement. `route.py` and
+`supervise.py` exit immediately without a key; `probe.py` still prints its inventory (you
+need to see it while setting up) and exits non-zero.
 
 This skill is shared across a team, so the Jev API key is never bundled with it — each
 person authenticates with their own TypeSafe account, the same way they would with `gh
 auth login` or a database credential. `probe.py` reports whether a key is currently
 configured and, if not, tells you the exact command to fix it.
 
-If the user wants live Jev judgement and `probe.py` reports no key configured, ask them
-for their TypeSafe API key (from `docs.typesafe.ai` / their TypeSafe account) and run:
+If `probe.py` reports no key configured, ask the user for their TypeSafe API key (from
+`docs.typesafe.ai` / their TypeSafe account) and run:
 
 ```bash
 python scripts/route.py --set-api-key apikey_...
@@ -64,14 +93,19 @@ configure. `--clear-api-key` removes it. Confirm it works with one live request:
 
 ```bash
 python scripts/probe.py --check-jev
-``` A `TYPESAFE_API_KEY` environment variable, if
-set, always takes precedence over the stored key, which is useful for CI or a temporary
-override without disturbing what is stored.
+```
+
+A `TYPESAFE_API_KEY` environment variable, if set, always takes precedence over the stored
+key, which is useful for CI or a temporary override without disturbing what is stored.
 
 **Never print, log, or echo the key itself** — confirmation messages only ever show a
-masked form (`apike...bf32`). Without a key, everything still works: routing falls back to
-a deterministic scorer whose confidence is hard-capped at 0.5, so it can recommend but
-never auto-execute. Tell the user this plainly rather than silently degrading.
+masked form (`apike...bf32`).
+
+If the user declines to set one, say plainly that Helm cannot route without it. You can
+still use `probe.py`'s inventory — knowing what is installed and logged in is genuinely
+useful on its own — and offer your own opinion *as your own*, clearly labelled. Never
+present that as a Helm routing decision; the whole value of one is that it came from a
+judge calibrated against recorded traces, and yours did not.
 
 ## The workflow
 
@@ -85,8 +119,11 @@ python scripts/probe.py --repo .
 ```
 
 Prints hardware, every installed agent with its version and one-line competence, which
-ones are routable, and whether the Jev decision layer is available. Results cache for 24
+ones are routable, and whether the Jev decision layer is configured. Results cache for 24
 hours (`--refresh` to force a re-probe; `--json` for the raw registry).
+
+A non-zero exit with a `DECISION LAYER (required)` warning means the key is missing. Fix
+that before step 2 — there is nothing for `route.py` to do until you have.
 
 Run this whenever the user asks what they have available, or before any routing decision.
 It calls no models, so it is cheap and safe to run eagerly.
@@ -206,8 +243,15 @@ The `mode` field is the decision:
 | `clarify` | The request is too vague to hand off | Ask the user the specific question that resolves it, then re-route |
 | `escalate` | No installed agent fits | Say so plainly and suggest what would need installing |
 
-Always tell the user **which brain judged it**. The `source` field is either `jev` or
-`fallback`, and a fallback verdict is a materially weaker claim — see below.
+Every verdict is Jev's, so `source` is always `jev` — it stays in the output because
+traces are calibrated per model version, not because there is an alternative.
+
+What varies, and what you *should* report, is **confidence and the gates**. Jev returns a
+distribution rather than a pick, so a low confidence is real information: it usually means
+two agents are a genuine near-tie, not that the system is unsure of itself. Say which agent
+and why, then say what stopped it running. "Cursor Agent, because it indexes the repo
+semantically — but `needs_human` came back 0.62, so I'd rather you approve it first" is the
+shape to aim for.
 
 For a dispatched run, `supervise.py` returns `outcome` and `next`:
 
@@ -244,21 +288,37 @@ DONE -- claude (completed)
 budget, so a retry never doubles the wall clock you asked for.
 
 Two cases deliberately never retry. A `timeout` may have left the tree half-modified, and
-re-dispatching onto unknown partial state turns one bad run into two. And a verdict from
-the **heuristic fallback** never triggers a retry at all — the fallback cannot tell a terse
-success from a no-op, so acting on it would risk re-running work that already succeeded.
-You will see `not retrying: verdict came from the fallback judge` when that happens.
+re-dispatching onto unknown partial state turns one bad run into two. And an **unjudged**
+run never retries — if Jev could not be reached after the agent ran, nobody knows what it
+did to the workspace, which is the worst possible basis for doing it again. You will see
+`not retrying: the run was never judged by Jev` when that happens.
 
-## When Jev is unavailable
+## When Jev is unreachable
 
-If no API key is configured (see setup above) or the API is unreachable, `route.py` falls
-back to a deterministic scorer over the same capability cards. This is a real, supported
-path, not an error state — but its confidence is hard-capped at 0.5, which by design means
-a fallback verdict can never reach `auto` mode.
+Helm stops. There is no second scorer, and this is a deliberate design choice rather than a
+missing feature.
 
-The reasoning: a degraded judge is allowed to *suggest*, never to *act unattended*. When
-you report a fallback result, say that Jev was unavailable and that the recommendation is
-heuristic. Do not present it with the same confidence as a Jev verdict.
+| Situation | What happens | Exit |
+|---|---|---|
+| No key configured | `route.py`/`supervise.py` print setup instructions and exit before probing | `2` |
+| Key present, API unreachable or rejected | `route.py` reports the API error; no route is produced | `4` |
+| Jev dies *after* the worker ran | Verdict is `error`, `next: escalate`, with the transcript path | — |
+
+The reasoning: the questions Helm asks are precisely the ones local heuristics answer
+badly. "Did the agent do the work or describe it?" needs a reader, not a keyword scan.
+"Which of these agents fits this task?" needs the fit between a task and a competence, not
+a scoring formula. A fallback that cannot tell would be confidently wrong on exactly the
+cases the tool exists to catch, so Helm says it does not know instead.
+
+**What to do when it happens.** Run `python scripts/probe.py --check-jev` — it makes one
+real inference call and names the failing stage. If the key is missing, offer the
+`--set-api-key` command. If the API is down, tell the user Helm is unavailable and give
+them your own recommendation *as your own*, clearly labelled. Never present your guess as a
+Helm routing decision.
+
+If a run ends `error` with "the agent ran but Jev could not judge the result", tell the
+user the workspace may have been modified and point them at the transcript path in the
+verdict. Do not re-dispatch.
 
 ## Presenting a recommendation
 
@@ -273,7 +333,8 @@ about uncertainty. Something like:
 > cursor-agent -p "rename Client to ApiClient across the repo and update all call sites"
 > ```
 >
-> Jev was unavailable, so this came from the heuristic scorer — worth a sanity check.
+> Confidence was 0.62, below the auto-execute bar, so this is a recommendation rather than
+> something I would run unattended.
 
 Avoid dumping raw JSON at the user unless they asked for it. The signals exist to justify
 the call, not to be recited.
@@ -314,7 +375,9 @@ thresholds in `route.py` and `supervise.py` are honest guesses until there are r
 to fit them against. If the user disagrees with a routing call, that disagreement is the
 valuable signal — note it, and point them at `references/calibration.md`.
 
-**Nothing here auto-executes on a weak signal.** Whenever Jev is unavailable, both the
-router and the supervisor cap their confidence below their own accept thresholds, so a
-degraded judge can recommend but never wave work through. If you find yourself about to say
-"it's done" on a `fallback` verdict, say "it looks done, but Jev wasn't available" instead.
+**Nothing here auto-executes on a weak signal.** Every gate in `route.py` is a reason to
+show the user a command instead of running it, and the thresholds are set to prefer that.
+A low-confidence Jev verdict is still a recommendation, not an instruction — report the
+confidence and the blocking gate rather than rounding it up to "this is the one". And if a
+run came back `error` because Jev could not judge it, never say "it's done": say nobody
+checked, and point at the transcript.

@@ -9,6 +9,7 @@ semantic judge is worth a network round-trip.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import time
@@ -25,9 +26,9 @@ LOG = Path("run.log")
 
 
 def verdict(status="completed", *, confidence=0.9, satisfied=0.9, needs_human=0.1,
-            awaiting=0.02, severity=0.3, source="jev"):
+            awaiting=0.02, severity=0.3):
     return {
-        "source": source,
+        "source": "jev",
         "answers": {
             "status": {"choice": status, "confidence": confidence},
             "task_satisfied": {"noul": satisfied},
@@ -98,52 +99,31 @@ class TestFailureHandling(unittest.TestCase):
         self.assertEqual(r["next"], "review")
 
 
-class TestFallbackJudging(unittest.TestCase):
-    def test_fallback_confidence_is_capped(self):
-        r = compose(verdict(confidence=0.99, source="fallback"))
-        self.assertLessEqual(r["signals"]["confidence"], S.THRESHOLDS["FALLBACK_CONFIDENCE_CAP"])
+class TestJevIsTheOnlyJudge(unittest.TestCase):
+    """"Did the agent do the work?" has exactly one answerer."""
 
-    def test_fallback_never_reaches_accept(self):
-        # The cap sits below DONE_MIN_CONFIDENCE, so a degraded judge can
-        # report but never wave work through unattended.
-        r = compose(verdict(confidence=0.99, satisfied=0.99, source="fallback"))
-        self.assertNotEqual(r["next"], "accept")
-        self.assertTrue(any("fallback" in n for n in r["notes"]))
+    def test_the_heuristic_judge_is_gone(self):
+        for name in ("fallback_judge", "ASKING_MARKERS", "FAILURE_MARKERS"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(S, name),
+                                 f"supervise.{name} should not exist any more")
 
-    def test_cap_is_below_the_accept_threshold_by_construction(self):
-        self.assertLess(S.THRESHOLDS["FALLBACK_CONFIDENCE_CAP"],
-                        S.THRESHOLDS["DONE_MIN_CONFIDENCE"])
+    def test_no_confidence_cap_threshold_remains(self):
+        self.assertNotIn("FALLBACK_CONFIDENCE_CAP", S.THRESHOLDS)
 
-    def test_terse_success_is_not_mistaken_for_a_no_op(self):
-        # Regression: a 39-char successful run was once judged no_op -> retry,
-        # which would re-run work that had already succeeded.
-        v = S.fallback_judge("patching parser\n2 files changed", 0, False)
-        self.assertNotEqual(v["answers"]["status"]["choice"], "no_op")
+    def test_a_confident_verdict_is_not_demoted(self):
+        r = compose(verdict(confidence=0.99, satisfied=0.99))
+        self.assertEqual(r["next"], "accept")
+        self.assertAlmostEqual(r["signals"]["confidence"], 0.99, places=3)
+        self.assertEqual(r["judged_by"], "jev")
 
-    def test_fallback_does_not_claim_to_detect_no_ops(self):
-        # Telling "did it" from "described it" needs a semantic reader.
-        for out in ("", "ok", "x" * 5000, "Here is what I would change: ..."):
-            with self.subTest(out=out[:20]):
-                v = S.fallback_judge(out, 0, False)
-                self.assertNotEqual(v["answers"]["status"]["choice"], "no_op")
-
-    def test_asking_a_question_is_detected(self):
-        v = S.fallback_judge("Would you like me to proceed?", 0, False)
-        self.assertEqual(v["answers"]["status"]["choice"], "blocked_needs_input")
-
-    def test_traceback_is_detected_even_on_a_zero_exit(self):
-        v = S.fallback_judge("Traceback (most recent call last)\nValueError", 0, False)
-        self.assertEqual(v["answers"]["status"]["choice"], "failed")
-
-    def test_auth_failure_text_is_treated_as_failure(self):
-        for text in ("invalid api key", "not logged in", "quota exceeded"):
-            with self.subTest(text=text):
-                v = S.fallback_judge(f"error: {text}", 0, False)
-                self.assertEqual(v["answers"]["status"]["choice"], "failed")
-
-    def test_nonzero_exit_is_failure(self):
-        v = S.fallback_judge("some output", 2, False)
-        self.assertEqual(v["answers"]["status"]["choice"], "failed")
+    def test_judge_propagates_an_outage_instead_of_answering_anyway(self):
+        # The old code caught this and returned a keyword-scan verdict. The
+        # whole point of the refactor is that it no longer can.
+        with mock.patch.object(S.jev, "ask",
+                               side_effect=S.jev.JevUnavailable("network down")):
+            with self.assertRaises(S.jev.JevUnavailable):
+                S.judge("t", "codex", "some output", 0, 1.0, False)
 
 
 class TestExcerpt(unittest.TestCase):
@@ -343,6 +323,19 @@ class TestRecoveryLoop(unittest.TestCase):
 
     ECHO = "import sys;print('ARGS', sys.argv[1:])"
 
+    def setUp(self):
+        # supervise() now refuses to dispatch without a key, so these tests
+        # supply one explicitly rather than depending on the developer's
+        # machine happening to have one configured.
+        self._old_key = os.environ.get("TYPESAFE_API_KEY")
+        os.environ["TYPESAFE_API_KEY"] = "apikey_test_notreal"
+
+    def tearDown(self):
+        if self._old_key is None:
+            os.environ.pop("TYPESAFE_API_KEY", None)
+        else:
+            os.environ["TYPESAFE_API_KEY"] = self._old_key
+
     def _reg(self, recovery=None, modes=None):
         headless = {
             "argv": [sys.executable, "-c", self.ECHO, "{flags}", "{prompt}"],
@@ -386,12 +379,36 @@ class TestRecoveryLoop(unittest.TestCase):
         self.assertIn("APPLY_IT_NOW", logs[1])      # the cure reached the agent
         self.assertIn("--force", logs[1])           # so did the mode it forced
 
-    def test_a_fallback_verdict_never_triggers_a_retry(self):
+    def test_an_unjudged_run_never_triggers_a_retry(self):
+        # Jev dies after the agent has already run. We do not know what it did
+        # to the workspace, which is the worst possible basis for doing it
+        # again -- so the run escalates with its transcript instead.
         r, _ = self._run(self._reg(recovery=self.RECOVERY),
-                         [verdict("no_op", satisfied=0.1, source="fallback"),
-                          verdict()])
-        self.assertEqual(len(r["attempts"]), 1)
-        self.assertTrue(any("fallback" in n for n in r["notes"]))
+                         [S.jev.JevUnavailable("network down"), verdict()])
+        self.assertEqual(r["outcome"], "error")
+        self.assertEqual(r["next"], "escalate")
+        self.assertIsNotNone(r["log"], "the transcript must still be reachable")
+        self.assertTrue(any("could not judge" in n for n in r["notes"]))
+
+    def test_supervise_refuses_to_dispatch_without_a_key(self):
+        # Checked before anything is spawned: an unjudgeable run is not worth
+        # the user's tokens or the risk to their working tree.
+        import keystore
+        old_path = keystore.CREDENTIALS_PATH
+        os.environ.pop("TYPESAFE_API_KEY", None)
+        with tempfile.TemporaryDirectory() as td:
+            keystore.CREDENTIALS_PATH = Path(td) / "credentials.json"
+            try:
+                with mock.patch.object(S, "judge") as judged:
+                    r = S.supervise("fake", "fix the parser", Path("."), 60,
+                                    False, 1, self._reg())
+            finally:
+                keystore.CREDENTIALS_PATH = old_path
+
+        self.assertEqual(r["outcome"], "error")
+        self.assertIn("--set-api-key", r["notes"][0])
+        judged.assert_not_called()
+        self.assertNotIn("attempts", r)
 
     def test_the_retry_budget_is_honoured(self):
         r, _ = self._run(self._reg(recovery=self.RECOVERY),
@@ -442,7 +459,11 @@ class TestRecoveryLoop(unittest.TestCase):
             orig, S.RUN_DIR = S.RUN_DIR, Path(td)
             try:
                 started = time.time()
-                r = S.supervise("fake", "t", Path("."), 4, False, 1, reg)
+                # judge() is stubbed because this test is about the budget, not
+                # the verdict -- and a real judge() would now reach for Jev.
+                # `timed_out` is what drives the outcome here regardless.
+                with mock.patch.object(S, "judge", return_value=verdict()):
+                    r = S.supervise("fake", "t", Path("."), 4, False, 1, reg)
                 self.assertLess(time.time() - started, 30)
                 self.assertEqual(r["outcome"], "timeout")
             finally:

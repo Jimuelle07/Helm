@@ -9,11 +9,11 @@ Both callers in this skill use it through here:
   * route.py     -- which agent should take this task?
   * supervise.py -- did the agent it dispatched actually finish?
 
-Keeping the client in one module means the auth path, the model pin, the
-timeout and the degradation behaviour are defined once. Every failure mode
-raises JevUnavailable, which callers are expected to catch and answer with a
-deterministic fallback -- Jev being unreachable must degrade the judgement,
-never break the tool.
+Keeping the client in one module means the auth path, the model pin and the
+timeout are defined once. Every failure mode raises JevUnavailable, and there
+is no second opinion to fall back to: Jev is the decision layer, so a Jev that
+cannot answer means Helm has no answer. Callers surface the failure and stop
+rather than substituting a weaker judgement the user did not ask for.
 """
 
 from __future__ import annotations
@@ -51,7 +51,13 @@ MAX_STATE_CHARS = 90_000
 
 
 class JevUnavailable(Exception):
-    """Raised whenever Jev cannot answer, for any reason. Always caught."""
+    """Raised whenever Jev cannot answer, for any reason.
+
+    This is a terminal condition, not a branch point. Nothing in this skill
+    catches it and continues with a locally computed answer -- callers report
+    it and exit, because a routing or completion verdict that did not come
+    from Jev is not a Helm verdict at all.
+    """
 
 
 def choice(instructions: str, criteria: dict[str, str]) -> dict:
@@ -67,7 +73,18 @@ def noul(instructions: str) -> dict:
 
 
 def available() -> bool:
+    """Whether a key is configured. Status reporting only.
+
+    Work paths call `require()` instead: this returns a bool that invites an
+    `if` around the decision layer, which is exactly the branch this skill no
+    longer has.
+    """
     return keystore.get_api_key() is not None
+
+
+def require() -> str:
+    """Fail fast unless Jev is configured. Raises keystore.MissingAPIKey."""
+    return keystore.require_api_key()
 
 
 def _encode_question(q: dict) -> dict:
@@ -101,12 +118,7 @@ def _encode_question(q: dict) -> dict:
 
 def ask(state: dict, questions: dict) -> dict:
     """One request, many questions, evaluated independently and in parallel."""
-    api_key = keystore.get_api_key()
-    if not api_key:
-        raise JevUnavailable(
-            "no TypeSafe API key configured. Run "
-            "`python route.py --set-api-key apikey_...` once, or set TYPESAFE_API_KEY."
-        )
+    api_key = keystore.require_api_key()
 
     blob = json.dumps(state)
     if len(blob) > MAX_STATE_CHARS:
@@ -174,8 +186,7 @@ def check() -> dict:
     the failure we care about is the one that happens at routing time.
     """
     if not available():
-        return {"ok": False, "stage": "key",
-                "detail": "no API key configured -- run `route.py --set-api-key ...`"}
+        return {"ok": False, "stage": "key", "detail": keystore.SETUP_HINT}
     try:
         resp = ask({"ping": "connectivity check"},
                    {"ok": noul("This is a connectivity check")})

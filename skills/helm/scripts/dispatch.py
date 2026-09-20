@@ -517,18 +517,18 @@ def should_recover(verdict: dict, rec: Recovery | None, attempt: int,
                    max_retries: int) -> tuple[bool, str]:
     """Whether to spend another run on this, and the reason either way.
 
-    The judged_by check is the important one. Re-dispatching is an *action*,
-    and this codebase's standing rule is that a degraded judge may report but
-    never act: the heuristic fallback cannot tell a terse success from a no-op,
-    so letting it trigger an automatic retry would re-run work that already
-    succeeded. Only Jev's verdict is allowed to spend money on a second attempt.
+    The judged_by check is defence in depth. Re-dispatching is an *action*, and
+    only a Jev verdict describes the run well enough to justify one -- an
+    `error`/`unjudged` verdict (Jev unreachable, precondition failed) says
+    precisely that nobody knows what the agent did, which is the worst possible
+    basis for running it again over the same workspace.
     """
     if rec is None:
         return False, "no recovery declared for this outcome"
     if attempt >= max_retries:
         return False, f"retry budget exhausted ({max_retries})"
     if verdict.get("judged_by") != "jev":
-        return False, "verdict came from the fallback judge -- too weak to act on"
+        return False, "the run was never judged by Jev -- nothing to act on"
     return True, rec.note or f"recovering from {rec.outcome}"
 
 

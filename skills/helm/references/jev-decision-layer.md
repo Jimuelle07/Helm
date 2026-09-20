@@ -8,6 +8,16 @@ decisions in a single forward pass.
 >
 > **Code calculates. Jev judges. LLMs reason and generate.**
 
+In Helm that division of labour is the architecture, not a preference:
+
+> **The probe observes. Jev judges. The chosen agent generates.**
+
+Jev is the mandatory middle term. `probe.py` gathers state and makes no decisions;
+`route.py` and `supervise.py` ask Jev and apply thresholds to its answers; the coding agent
+writes code. Nothing in this skill computes a routing decision, a blast radius or a
+completion judgement locally — with no key, the entry points exit rather than substitute
+something weaker. See "Why there is no fallback" below.
+
 Practical numbers: 70–500 ms end to end, $0.042 per *million* input tokens with output
 free, 64k context (32k for state plus the longest question), text only. Cheap enough that
 the control plane of an agent harness can run on **every** task rather than only the ones
@@ -41,7 +51,7 @@ modules.
 
 | Key | Type | Why it exists |
 |---|---|---|
-| `task_kind` | Choice(10) | Drives the fallback scorer and gives traces a grouping dimension |
+| `task_kind` | Choice(10) | Drives dispatch-mode selection and gives traces a grouping dimension |
 | `agent` | Choice(**dynamic**) | The routing decision itself |
 | `blast_radius` | Score(4) | How much damage a wrong edit does — gates automation |
 | `spec_clarity` | Score(4) | Distinguishes "ask a question" from "hand it off" |
@@ -73,6 +83,46 @@ respected.
 `compose()` re-checks the returned name against the routable set anyway. That path is
 unreachable through a Choice by construction; it is defence in depth against a future edit
 that widens the answer space.
+
+## Why there is no fallback
+
+Earlier versions of this skill shipped a deterministic local scorer for when no key was
+configured: regex task classification, a weighted fit-versus-context formula, keyword scans
+over the transcript. It was removed, and the reasoning is worth keeping because it explains
+what the decision layer is actually *for*.
+
+Every question in both sets above is a judgement about meaning:
+
+- **`agent`** asks for the fit between a task description and a competence sentence. A
+  scoring formula can only compare a hand-assigned `task_fit` integer against a
+  regex-guessed category — it is reading neither the task nor the competence.
+- **`task_satisfied`** asks whether the agent *did* the work or *described* it. The old
+  fallback explicitly refused to guess at `no_op` for exactly this reason: an early draft
+  inferred it from output length and misjudged a terse success, which maps to `retry` and
+  would have re-run work that had already succeeded.
+- **`spec_clarity`** asks whether a request is actionable. Counting file paths and quoted
+  literals is a proxy for that, and a poor one.
+
+So the fallback was weakest precisely where the tool's value is highest. Worse, it was
+weak *invisibly*: a capped-confidence recommendation still looks like a recommendation, and
+"Jev was unavailable" is easy to skim past. A system that cannot tell should say so.
+
+The costs of removing it are real and accepted: Helm now has a hard network dependency and
+a hard credential dependency, and an outage takes the whole harness down. That is the right
+trade for a tool whose entire output is judgement. An inventory is still available —
+`probe.py` prints one before it exits non-zero.
+
+What the caller sees instead:
+
+| Situation | Behaviour | Exit |
+|---|---|---|
+| No key configured | `keystore.MissingAPIKey`, setup instructions, before any probe | `2` |
+| API unreachable or rejects the key | `jev.JevUnavailable`, the API's own error text | `4` |
+| Jev dies after the worker ran | verdict `error` / `next: escalate`, transcript path kept | — |
+
+`keystore.require_api_key()` is the single gate; `probe.py`, `route.py` and `supervise.py`
+all call it and all print the same `keystore.SETUP_HINT`, so one failure never produces
+three different instructions.
 
 ## The second question set: did the worker finish?
 
@@ -141,6 +191,11 @@ environment first, then a key stored locally via `route.py --set-api-key`. Every
 this skill has their own TypeSafe account, so the key is never hardcoded or bundled — see
 `SKILL.md`'s "Setting up Jev" section for the exact flow to walk a new user through.
 
+Work paths call `keystore.require_api_key()` rather than `get_api_key()`. The distinction
+matters: the first raises, the second returns `None` and invites an `if` around the
+decision layer. `jev.available()` still exists for status reporting — `probe.py` uses it to
+render the `DECISION LAYER (required)` block — but nothing branches its behaviour on it.
+
 ```python
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
@@ -175,7 +230,10 @@ One asymmetry worth knowing when reading answers back: a `choice` keys its `prob
 by option name, while a `score` keys them by stringified index (`"0"`, `"1"`, …) and ships a
 `legend` mapping those indices to the level text.
 
-Run `probe.py --check-jev` to confirm a key against the live API before relying on it.
+Run `probe.py --check-jev` to confirm a key against the live API before relying on it. It
+sends the smallest real inference request rather than hitting `/v1/models`, because a key
+can list models happily and still fail on inference — and inference is what routing needs.
+Exit `0` means Helm can route; exit `1` names the failing stage.
 
 ## Pin the model version
 

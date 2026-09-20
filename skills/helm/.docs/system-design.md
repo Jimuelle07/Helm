@@ -20,7 +20,7 @@ structure — not a function call into a model.
   ┌─ L2 JUDGE ─────────────────────▼──────────────────────────── Jev only ─┐
   │  judge/questions.py  THE question set + THE thresholds (one file)       │
   │  judge/client.py     one request, 7 questions, evaluated in parallel    │
-  │  judge/fallback.py   deterministic scorer when Jev is unavailable       │
+  │                      no key or no answer → the pipeline stops here      │
   └────────────────────────────────┬───────────────────────────────────────┘
                                    │ Verdict: typed answers + confidence
   ┌─ L3 COMPOSE ───────────────────▼──────────────────────────── code only ─┐
@@ -109,8 +109,8 @@ tool unless it gets called." Shape:
 judge*: concrete, discriminating, and contrastive against its siblings. Vague cards produce vague
 routing — the card text is a tuned parameter, not documentation.
 
-`task_fit` exists only for the deterministic fallback scorer (§5.3). Jev itself reads `competence`,
-`strengths`, and `weaknesses`.
+`task_fit` is the card author's declared intent and a test asserts it covers all ten kinds. It is
+not read at routing time — Jev reads `competence`, `strengths`, and `weaknesses`.
 
 ## 4. State handed to Jev
 
@@ -142,7 +142,7 @@ rule #2.
 
 | Key | Type | Purpose | Consumed by |
 |---|---|---|---|
-| `task_kind` | Choice(10) | scaffold / feature / bugfix / refactor / test / docs / review / research / ops / other | fallback scorer, telemetry |
+| `task_kind` | Choice(10) | scaffold / feature / bugfix / refactor / test / docs / review / research / ops / other | dispatch modes, telemetry |
 | `agent` | Choice(**dynamic**) | **the routing decision** — criteria built from installed agents only | router |
 | `blast_radius` | Score(4) | how much damage a bad edit does | approval gate |
 | `spec_clarity` | Score(4) | how well-specified the request is | clarify-vs-execute gate |
@@ -169,17 +169,28 @@ Because `criteria` is built from probe output, **recommending an uninstalled age
 impossible** rather than merely unlikely (`idea.md` §3, Claim 3). The `none` escape hatch is
 mandatory per `context.md` §3 — without it a bad taxonomy forces a bad answer.
 
-### 5.3 Fallback when Jev is unavailable
+### 5.3 When Jev is unavailable
 
-No `TYPESAFE_API_KEY` is set on this machine, so this path is **load-bearing, not decorative**.
+**Superseded.** This section originally specified a deterministic fallback scorer
+(`task_fit[task_kind] × context_class_match`, keyword heuristics for `task_kind`) returning a
+`Verdict` with `source="fallback"` and confidence capped at 0.5, on the reasoning that a degraded
+brain may *suggest* but never *act unattended*.
 
-`judge/fallback.py` scores each routable agent with `task_fit[task_kind] × context_class_match`,
-using keyword heuristics for `task_kind`. It returns the same `Verdict` shape with
-`source="fallback"` and **`confidence` capped at 0.5**, which — by the thresholds in §6 —
-automatically forces every fallback route into recommend-only mode rather than auto-execution.
+It was built and then removed. The cap worked as specified, but the premise did not survive
+contact: the scorer was least trustworthy on exactly the judgements the harness exists to make —
+the fit between a task and a competence line, and whether an agent did the work or described it —
+and a capped-confidence recommendation still reads to a user as a recommendation.
 
-That cap is the design: a degraded brain is allowed to *suggest*, never to *act unattended*. Every
-surface states which brain answered.
+The current design: Jev is mandatory and there is no second judge.
+
+| Situation | Behaviour | Exit |
+|---|---|---|
+| No key configured | `keystore.MissingAPIKey`, setup instructions, before any probe | `2` |
+| API unreachable or rejects the key | `jev.JevUnavailable`, the API's own error text | `4` |
+| Jev dies after the worker ran | verdict `error` / `next: escalate`, transcript path kept | — |
+
+`keystore.require_api_key()` is the single gate, and `probe.py`, `route.py` and `supervise.py` all
+print the same `keystore.SETUP_HINT`. Full reasoning in `references/jev-decision-layer.md`.
 
 ## 6. Thresholds
 
@@ -193,7 +204,6 @@ requires — one reviewable, diffable surface.
 | `HUMAN_GATE_NOUL` | 0.50 | `needs_human` above this → require approval |
 | `AUTO_MAX_BLAST_RADIUS` | 2.0 | above → require approval |
 | `IRREVERSIBLE_NOUL` | 0.40 | `reversible` below this → require approval |
-| `FALLBACK_CONFIDENCE_CAP` | 0.50 | ceiling on any non-Jev verdict |
 
 > **Every one of these is UNCALIBRATED.** They are starting points, not tuned values.
 > `context.md` §5 is explicit: calibration is a property of a *population* of recorded traces, and a
@@ -221,8 +231,9 @@ than assumed, because a wrong flag is a silent routing failure.
 ## 8. Telemetry for calibration
 
 Every decision appends one JSONL row to `traces/decisions.jsonl`: state digest, all seven raw
-answers with confidences, the composed route, the source (`jev` | `fallback`), and — when known —
-the outcome. This is the corpus §6's thresholds get fitted against. Without it, calibration is
+answers with confidences, the composed route, the source (always `jev`; the field predates the
+fallback's removal and older rows may carry `"fallback"`, so filter on it before fitting), and —
+when known — the outcome. This is the corpus §6's thresholds get fitted against. Without it, calibration is
 impossible and the thresholds stay guesses forever, so the trace writer ships in v1, not later.
 
 ## 9. Pin the model
@@ -267,7 +278,7 @@ docs/machine-profile.md             # YOUR real local survey -- gitignored, neve
 
 1. `cards/` — the declared knowledge, written before any code that consumes it
 2. `probe.py` — hardware + PATHEXT-aware discovery *(the bug-prone part)*
-3. `route.py` — question set, thresholds, Jev client, fallback, compose, execute
+3. `route.py` — question set, thresholds, Jev client, compose, execute
 4. `tests/` — pure layers exhaustively
 5. `SKILL.md` + `references/` — the distributable surface
 
@@ -281,8 +292,13 @@ Three things the plan got wrong, corrected in code and worth carrying forward:
   would have silently dropped two working agents, which is the *same* failure as a
   PATHEXT-blind probe, just wearing a more reassuring error message. Auth is now a caveat.
 - **`probabilities` meant two different things.** Jev returns a real distribution; the
-  fallback was writing raw scores under the same key. Normalised, because a field whose
-  scale depends on which brain answered is unanalysable the moment anyone tries to calibrate.
+  fallback was writing raw scores under the same key. Normalising them was the fix at the
+  time, and the problem disappeared entirely when the fallback did — but the episode is the
+  reason `source` is still recorded in every trace.
+- **The fallback scorer was a mistake and was removed.** §5.3 has the reasoning. The short
+  version: it was weakest precisely where the harness earns its keep, and it failed
+  *invisibly*, which is worse than failing loudly. Helm now has a hard dependency on Jev
+  and says so.
 - **Windows batch execution is an injection surface.** Most agent CLIs on Windows resolve to
   `.cmd` shims, which `CreateProcess` runs through `cmd.exe` — so an untrusted prompt
   containing shell metacharacters is the BatBadBut class of bug (CVE-2024-24576). The
