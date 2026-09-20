@@ -66,9 +66,11 @@ Resolution order per candidate binary name:
 3. Record the **resolved absolute path**, not the name.
 4. Probe `--version` with a short timeout; a timeout marks the agent `degraded`, not `absent`.
 
-Non-headless IDE launchers found on this machine (`kiro`, `antigravity-ide`, `cursor`, `orca`) are
-recorded as `present` but carry `headless: null`, so they are **excluded from the routing answer
-space** while remaining visible in `doctor`. Being installed is not the same as being routable.
+Non-headless IDE launchers (desktop apps with no scriptable CLI entry point) are recorded as
+`present` but carry `headless: null`, so they are **excluded from the routing answer space**
+while remaining visible in `doctor`. Being installed is not the same as being routable — and
+which particular launchers are on any given machine is exactly the kind of local inventory
+this project keeps out of committed docs; see `machine-profile.example.md`.
 
 ### 3.2 Hardware profile
 
@@ -257,7 +259,8 @@ skills/helm/
     ├── jev-decision-layer.md       # the question set and the Jev API
     └── calibration.md              # thresholds, why they are guesses, how to fit them
 tests/test_router.py                # 31 tests over the pure layers
-docs/machine-profile.md             # generated snapshot of the development box
+docs/machine-profile.example.md     # illustrative report shape (fabricated data, checked in)
+docs/machine-profile.md             # YOUR real local survey -- gitignored, never committed
 ```
 
 ### Build order (completed)

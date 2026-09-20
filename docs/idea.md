@@ -32,8 +32,10 @@ finding that out is paid per-attempt, forever.
 
 ## 2. What is actually on this machine
 
-The argument above is abstract until you run the probe. On the development box
-(full survey in [`machine-profile.md`](./machine-profile.md)):
+The argument above is abstract until you run the probe. On the development box this was
+written on (shape of the report illustrated in
+[`machine-profile.example.md`](./machine-profile.example.md) — a fabricated machine, not a
+real one; your own real survey is local-only and gitignored, see that file's header):
 
 | Agent CLI | Version | Notes |
 |---|---|---|

@@ -55,6 +55,30 @@ always takes precedence if set). Without a key, routing falls back to a determin
 scorer whose confidence is capped at 0.5 — a degraded judge may suggest, never act
 unattended.
 
+## Privacy: what stays on your machine
+
+Helm scans the machine it runs on — installed agent CLIs, hardware, auth state, the
+current repo's path — and writes what it learns to disk. None of that is a build
+artifact meant for the team; it is personal-machine telemetry and a credential, and it
+never belongs in a commit:
+
+| File | What it holds | Default location |
+|---|---|---|
+| `credentials.json` | your TypeSafe API key | `~/.cache/helm/` |
+| `registry.json` | the probe cache: hardware, installed agents, repo path | `~/.cache/helm/` |
+| `decisions.jsonl` | every routed task's intent text and Jev's verdict | `~/.cache/helm/` |
+| agent transcripts | full worker output, can include file contents | system temp dir |
+
+All four default **outside this repository** (`~/.cache/helm`, the system temp dir), so a
+clean checkout never has them, and overriding any of `HELM_CACHE` / `HELM_CREDENTIALS` /
+`HELM_TRACES` / `HELM_RUNS` to a repo-local path is still caught by `.gitignore` as long
+as it lands under `.helm/`.
+
+`docs/machine-profile.md`, if you generate one by hand from `probe.py`'s output the way
+`docs/machine-profile.example.md` describes, is gitignored for the same reason — it is a
+snapshot of *your* installed tools and hardware, not the team's. The example file is
+fabricated data, checked in only to illustrate the report's shape.
+
 ## Layout
 
 | Path | What it is |
