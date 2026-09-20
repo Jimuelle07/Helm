@@ -1,25 +1,37 @@
 ---
 name: helm
 description: >
-  Discovers which coding-agent CLIs are actually installed AND logged in on this machine
-  (Claude Code, Codex, Cursor Agent, Gemini, Aider, OpenCode, Copilot, Ollama and others)
-  along with its CPU/RAM/VRAM, then uses TypeSafe Jev — its required typed decision layer —
-  to pick the best available agent, dispatch the task, and judge whether the worker finished.
-  Use this whenever the user asks which model or agent should handle something, wants to
-  delegate or route work to another CLI agent, asks what agents or models are available on
-  their machine, compares agents ("is Claude or Codex better for this refactor?"), asks
-  whether a task can run on a local model, hits an agent CLI that is installed but failing
-  to call its model, or wants a build orchestrated across several agents. Also use it before
-  starting a substantial build when picking the wrong tool would be expensive — even if the
-  user never names an agent — because a coding agent otherwise cannot see the sibling agents
-  installed right next to it. This skill is about steering AI coding agents; it has nothing
-  to do with Helm the Kubernetes package manager, so do not use it for charts, `helm install`,
-  Kubernetes releases, or cluster deployment.
+  Routes a coding task to the best AI agent installed on this machine. Probes which agent CLIs
+  are installed AND logged in - Claude Code, Codex, Cursor Agent, Gemini CLI, Aider, OpenCode,
+  GitHub Copilot, Amp, Droid, Crush, Goose, Qwen Code, Ollama and local models - reads
+  CPU/RAM/VRAM, then uses TypeSafe Jev, its required typed decision layer, to choose one,
+  dispatch the task and judge whether the worker finished. Use it for: which model or agent
+  should handle this; what agents or models do I have; is Claude or Codex better for this
+  refactor; delegate, hand off, route, dispatch or orchestrate work across agents, sub-agents or
+  a multi-agent build; can this run on a local model; an agent CLI that is installed but failing
+  to call its model; and before any substantial build where picking the wrong tool is expensive,
+  since an agent cannot see the sibling agents beside it. Not Helm the Kubernetes package
+  manager: never for charts, `helm install`, releases or clusters.
+license: MIT
+metadata:
+  author: Jimuelle Patron
+  homepage: https://github.com/Jimuelle07/Helm
+  keywords:
+    - agent-orchestration
+    - agent-router
+    - model-routing
+    - coding-agents
+    - multi-agent
+    - task-delegation
+    - cli-agents
+    - typesafe-jev
 ---
 
 # Helm
 
 *Taking the helm of the agents already on your machine.*
+
+Built by [Jimuelle Patron](https://github.com/Jimuelle07) · MIT · [github.com/Jimuelle07/Helm](https://github.com/Jimuelle07/Helm)
 
 Helm is an orchestration harness: it inventories the coding agents installed on this
 machine (`probe.py`), routes a task to the best one (`route.py`), dispatches it and judges

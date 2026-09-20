@@ -1,0 +1,5 @@
+{
+  "name": "helm",
+  "version": "0.1.0",
+  "description": "Helm by Jimuelle Patron - steering and control for the coding agents already on your machine: probes which agent CLIs are installed and logged in, routes each task to the best one with TypeSafe Jev, dispatches it, and judges whether the work actually got done."
+}

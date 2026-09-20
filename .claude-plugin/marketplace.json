@@ -1,8 +1,8 @@
 {
   "name": "helm",
-  "description": "Helm: steering and control for the coding agents already on your machine.",
+  "description": "Helm by Jimuelle Patron: an orchestrator that routes coding tasks to the best AI agent installed on your machine.",
   "owner": {
-    "name": "Jimuelle07",
+    "name": "Jimuelle Patron",
     "url": "https://github.com/Jimuelle07"
   },
   "plugins": [
@@ -14,10 +14,21 @@
       "source": "./",
       "keywords": [
         "agent-orchestration",
-        "routing",
+        "agent-router",
+        "model-routing",
         "coding-agents",
-        "typesafe",
-        "jev"
+        "multi-agent",
+        "task-delegation",
+        "cli-agents",
+        "ai-agents",
+        "claude-code",
+        "codex",
+        "cursor",
+        "gemini-cli",
+        "aider",
+        "opencode",
+        "typesafe-jev",
+        "agent-skills"
       ]
     }
   ]

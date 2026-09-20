@@ -5,12 +5,22 @@
 </p>
 
 <p align="center">
+  An AI coding-agent orchestrator and model router for Claude Code, Codex,
+  Cursor, Gemini CLI, Aider, OpenCode, Copilot and local models &mdash;
+  installable as a Claude Code plugin, a Gemini CLI extension, or an Agent Skill.
+</p>
+
+<p align="center">
+  Built by <a href="https://github.com/Jimuelle07">Jimuelle Patron</a>
+</p>
+
+<p align="center">
   <img alt="Python 3.10+" src="https://img.shields.io/badge/Python-3.10%2B-FFD43B?style=plastic&logo=python&logoColor=1F2937&labelColor=3776AB">
   <img alt="Standard library only" src="https://img.shields.io/badge/Dependencies-stdlib%20only-34D399?style=plastic&logo=dependabot&logoColor=white&labelColor=065F46">
   <img alt="Powered by TypeSafe Jev" src="https://img.shields.io/badge/Decisions-TypeSafe%20Jev-C084FC?style=plastic&logo=sparkles&logoColor=white&labelColor=6D28D9">
   <img alt="Cross platform" src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-93C5FD?style=plastic&logo=windows&logoColor=white&labelColor=1E3A8A">
   <img alt="MIT license" src="https://img.shields.io/badge/License-MIT-5EEAD4?style=plastic&logo=opensourceinitiative&logoColor=white&labelColor=0F766E">
-  <img alt="Claude Code plugin" src="https://img.shields.io/badge/Install-Claude%20Code%20plugin-F59E0B?style=plastic&logo=anthropic&logoColor=white&labelColor=92400E">
+  <img alt="Installs as a plugin, an extension, or a skill" src="https://img.shields.io/badge/Installs%20as-plugin%20%7C%20extension%20%7C%20skill-F59E0B?style=plastic&logo=githubactions&logoColor=white&labelColor=92400E">
 </p>
 
 > Not related to Helm, the Kubernetes package manager. This Helm steers AI
@@ -20,9 +30,11 @@ Helm is an orchestrator for coding agents. It discovers which agent CLIs are
 installed and authenticated on your machine, routes each task to the best one,
 dispatches it, and judges whether the work actually got done.
 
-It ships as a Claude Code plugin containing a single skill — two commands to
-install, and the agent you are already talking to gains an inventory of every
-sibling agent on the box. See [Install The Plugin](#install-the-plugin).
+It ships as one skill in the agent-neutral `SKILL.md` format: a Claude Code
+plugin, a Gemini CLI extension, and an `npx skills add` away on Codex, Cursor,
+OpenCode and 80+ others. Two commands on any of them, and the agent you are
+already talking to gains an inventory of every sibling agent on the box. See
+[Install](#install).
 
 If you have `claude`, `codex`, `cursor-agent`, `gemini`, `aider`, `opencode`,
 `copilot`, or local agents installed, they are usually invisible to one another.
@@ -120,8 +132,8 @@ quietly answering. See
 ## Quick Start
 
 No package install is required. Helm uses Python 3.10+ and the standard library.
-The commands below drive the scripts directly from a clone; to install it as a
-plugin instead, see [Install The Plugin](#install-the-plugin).
+The commands below drive the scripts directly from a clone; to install Helm
+into an agent instead, see [Install](#install).
 
 Configure the decision layer first — nothing routes without it. This is once per
 user, because the skill is shared across a team and each person brings their own
@@ -249,8 +261,11 @@ pieces the skill drives.
 ```text
 .
 |-- .claude-plugin/
-|   |-- plugin.json          <- plugin manifest
+|   |-- plugin.json          <- Claude Code plugin manifest
 |   `-- marketplace.json     <- lets this repo serve itself as a marketplace
+|-- gemini-extension.json    <- Gemini CLI extension manifest
+|-- install.sh               <- drop the skill into any other agent
+|-- install.ps1              <- the same, for PowerShell
 `-- skills/helm/
     |-- SKILL.md             <- when to use Helm, how to read a verdict
     |-- scripts/
@@ -276,10 +291,16 @@ installed?"*, or *"route this build to whatever is best"* load it on their own �
 as does the start of any substantial build, where picking the wrong tool is
 expensive.
 
-## Install The Plugin
+## Install
 
-Helm is a Claude Code plugin, and this repository doubles as its own
-marketplace, so there is nothing to clone or copy by hand. In Claude Code:
+Helm is a single skill written in the agent-neutral `SKILL.md` format, so it
+installs natively wherever you already work. Pick your host — the decision-layer
+step at the end is the same for all of them.
+
+### Claude Code
+
+This repository doubles as its own plugin marketplace, so there is nothing to
+clone or copy by hand:
 
 ```bash
 /plugin marketplace add Jimuelle07/Helm
@@ -293,19 +314,90 @@ claude plugin marketplace add Jimuelle07/Helm
 claude plugin install helm@helm
 ```
 
-Then give Helm its decision layer. This is once per user — the plugin ships no
-key, because it is meant to be shared across a team and each person brings their
-own TypeSafe account. The easiest way is to let the agent do it, since it
-already knows where its own plugin lives:
+Housekeeping later on:
+
+```bash
+claude plugin update helm@helm             # pull a newer version
+claude plugin marketplace update helm      # refresh the marketplace listing
+claude plugin uninstall helm@helm          # remove it
+```
+
+### Gemini CLI
+
+The repository is also a Gemini CLI extension, and the skill under `skills/` is
+discovered as part of installing it:
+
+```bash
+gemini extensions install https://github.com/Jimuelle07/Helm
+```
+
+Then `gemini extensions list` to confirm, `gemini extensions update helm` to
+upgrade, `gemini extensions uninstall helm` to remove.
+
+### Codex, Cursor, OpenCode, and everything else
+
+The shortest path is [`npx skills`](https://github.com/vercel-labs/skills), a
+package manager for Agent Skills that knows where 80+ agents keep theirs. It
+reads this repository directly — no clone, no install step of ours:
+
+```bash
+npx skills add Jimuelle07/Helm            # choose agents interactively
+npx skills add Jimuelle07/Helm -g -a '*'  # globally, into every agent it finds
+npx skills add Jimuelle07/Helm --list     # just show what the repo contains
+```
+
+`-a` takes agent ids (`claude-code`, `opencode`, and so on); leave it off and it
+asks. `-g` installs for your user rather than the current project. Afterwards,
+`npx skills list`, `npx skills update helm`, and `npx skills remove helm`.
+
+If you would rather not depend on `npx`, these agents all read Agent Skills
+straight off disk, so installing is just putting `skills/helm/` where the agent
+looks. `install.sh` does that — by symlink, so one `git pull` updates every
+agent at once:
+
+```bash
+git clone https://github.com/Jimuelle07/Helm.git
+cd Helm
+./install.sh                  # ~/.agents/skills -- the shared location
+./install.sh codex cursor     # or each agent's own directory as well
+```
+
+On Windows, `.\install.ps1` takes the same arguments and links with a junction,
+which needs neither administrator rights nor developer mode.
+
+| Argument | Installs to | Read by |
+| --- | --- | --- |
+| *(none)* | `~/.agents/skills/helm` | Codex, Cursor, OpenCode, and other Agent Skills hosts |
+| `codex` | `$CODEX_HOME/skills/helm` | Codex CLI |
+| `cursor` | `~/.cursor/skills/helm` | Cursor |
+| `opencode` | `~/.config/opencode/skills/helm` | OpenCode |
+| `claude` | `~/.claude/skills/helm` | Claude Code, without going through the plugin |
+| `project` | `./.agents/skills/helm` | Any of the above, scoped to one repository |
+
+`--copy` copies instead of linking, `--list` prints where Helm is currently
+installed, and `--uninstall` removes it again.
+
+For an agent that is not on that list, copy `skills/helm/` into whatever
+directory it scans — the folder is self-contained — or skip the skill entirely
+and call the scripts as in [Quick Start](#quick-start). Nothing in Helm depends
+on having been installed.
+
+### Then, on every host: the decision layer
+
+Helm routes nothing without a TypeSafe key, and it deliberately ships with none:
+the skill is meant to be shared across a team, so each person brings their own
+account. The easiest way is to ask the agent, which already knows where its own
+copy of the skill lives:
 
 > *"set up Helm's TypeSafe key: `apikey_...`"*
 
 That runs `route.py --set-api-key`, which stores the key at
-`~/.cache/helm/credentials.json` — outside the plugin, so it survives every
-update — and prints only a masked form of it back. Two alternatives if you would
-rather not hand a key to an agent: export `TYPESAFE_API_KEY` in your shell, which
-always takes precedence, or run the script yourself from the installed copy under
-`~/.claude/plugins/cache/helm/helm/<version>/`.
+`~/.cache/helm/credentials.json` — outside the skill, so it survives updates and
+is shared by every agent you installed Helm into — and echoes back only a masked
+form of it. To do it by hand instead, export `TYPESAFE_API_KEY`, which always
+takes precedence, or run the script from wherever the skill landed:
+`./install.sh --list`, or `~/.claude/plugins/cache/helm/helm/<version>/` for the
+Claude Code plugin.
 
 Confirm the whole path works with one live inference call:
 
@@ -317,28 +409,6 @@ reach for `probe.py` without being told to.
 
 Requirements are Python 3.10+ on `PATH` and a TypeSafe API key. Nothing is
 installed into your Python environment; the scripts are standard library only.
-
-Housekeeping later on:
-
-```bash
-claude plugin update helm@helm             # pull a newer version
-claude plugin marketplace update helm      # refresh the marketplace listing
-claude plugin uninstall helm@helm          # remove it
-```
-
-### Without the plugin
-
-Any other agent — or a plain shell — can use Helm by cloning it and calling the
-scripts directly, which is exactly what [Quick Start](#quick-start) shows:
-
-```bash
-git clone https://github.com/Jimuelle07/Helm.git
-cd Helm
-python skills/helm/scripts/probe.py --repo .
-```
-
-For agents that read skills from a directory, point them at `skills/helm/` or
-copy that folder into wherever they keep theirs — it is self-contained.
 
 ## Teaching Helm A New Agent
 
@@ -388,3 +458,41 @@ See `skills/helm/references/capability-cards.md`.
   risky, is it finished — so with the decision layer unreachable there is
   nothing left to orchestrate with but an inventory, which is what `probe.py`
   prints before it exits non-zero.
+
+## FAQ
+
+**Is this Helm, the Kubernetes package manager?** No. There is no relation. This
+Helm steers AI coding agents; it has nothing to do with charts, `helm install`,
+releases or clusters. It is a name collision, nothing more.
+
+**Which coding agents does it support?** Claude Code, Codex, Cursor Agent,
+Gemini CLI, Aider, OpenCode, GitHub Copilot, Amp, Droid, Crush, Goose, Qwen Code
+and Ollama-hosted local models, via one [capability
+card](skills/helm/references/capability-cards.md) each. Adding another is a
+single JSON file.
+
+**Which agents can run Helm itself?** Any that reads Agent Skills — Claude Code,
+Codex, Cursor, OpenCode, Gemini CLI and 80+ more. See [Install](#install).
+
+**Do I need a TypeSafe account?** Yes. Jev is the decision layer, not an
+optional accelerator, and there is no fallback scorer — see
+[Jev is required](#jev-is-required). Routing costs about $0.0001 per task.
+
+**How is this different from asking an LLM which agent to use?** The answer
+space is built from what the probe found, so recommending an agent you do not
+have is structurally impossible rather than merely unlikely, and confidence is a
+real number you can gate on. See [Why a typed decision model and not another
+LLM](#why-a-typed-decision-model-and-not-another-llm).
+
+**Does it work on Windows?** Yes — Windows, macOS and Linux, on Python 3.10+
+with no third-party packages.
+
+## Credits
+
+Helm was built by **[Jimuelle Patron](https://github.com/Jimuelle07)** and is
+released under the [MIT license](LICENSE). The decision layer is
+[TypeSafe Jev](https://typesafe.ai).
+
+If Helm routed something well — or badly — that disagreement is the useful
+signal: open an issue at
+[github.com/Jimuelle07/Helm](https://github.com/Jimuelle07/Helm/issues).

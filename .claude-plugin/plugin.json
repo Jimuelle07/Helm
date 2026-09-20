@@ -2,9 +2,9 @@
   "name": "helm",
   "displayName": "Helm",
   "version": "0.1.0",
-  "description": "Steering and control for the coding agents already on your machine. Probes which agent CLIs are installed and logged in, routes each task to the best one with TypeSafe Jev, dispatches it, and judges whether the work actually got done.",
+  "description": "Routes each coding task to the best AI agent installed on your machine. Probes which agent CLIs are installed and logged in - Claude Code, Codex, Cursor, Gemini CLI, Aider, OpenCode, Copilot, Ollama - then uses TypeSafe Jev to choose one, dispatch the task, and judge whether the work got done.",
   "author": {
-    "name": "Jimuelle07",
+    "name": "Jimuelle Patron",
     "url": "https://github.com/Jimuelle07"
   },
   "homepage": "https://github.com/Jimuelle07/Helm",
@@ -12,10 +12,20 @@
   "license": "MIT",
   "keywords": [
     "agent-orchestration",
-    "routing",
+    "agent-router",
+    "model-routing",
     "coding-agents",
-    "typesafe",
-    "jev",
-    "cli"
+    "multi-agent",
+    "task-delegation",
+    "cli-agents",
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "cursor",
+    "gemini-cli",
+    "aider",
+    "opencode",
+    "typesafe-jev",
+    "agent-skills"
   ]
 }
