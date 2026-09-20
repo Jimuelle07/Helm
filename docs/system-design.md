@@ -285,6 +285,23 @@ Three things the plan got wrong, corrected in code and worth carrying forward:
   containing shell metacharacters is the BatBadBut class of bug (CVE-2024-24576). The
   executor refuses rather than attempting to quote, since `cmd.exe` quoting is genuinely
   hard to get right and the user can always run the printed command themselves.
+- **"Installed" was never the right precondition; "authenticated" is.** The original L1 design
+  treated discovery as the whole job, but a CLI that was downloaded and never logged in passes
+  every check the probe made and then fails on its first model call. The fix is a third state
+  rather than a boolean: cards carry an `auth_check` (the tool's own status command), and only
+  a definitive *the tool says it is logged out* removes an agent from the answer space. An
+  undetected credential still means nothing — on this machine `cursor-agent` reported no
+  discoverable credential while `cursor-agent status` showed a live session, so gating on the
+  heuristic would have dropped a working agent. Evidence of absence disqualifies; absence of
+  evidence never does.
+- **Completion is a judgement, so it belongs to Jev too.** L4 originally ended at
+  `subprocess.run`, leaving "did that work?" to the orchestrating model — which means reading a
+  transcript of tens of thousands of tokens, paying for it, and carrying the build noise in
+  context for the rest of the session. `supervise.py` sends the transcript to Jev instead
+  (~$0.002 for 50k tokens, output free) and returns a few hundred bytes plus a path to the log
+  on disk. It also buys accuracy the cheap check cannot have: `rc == 0` cannot separate "wrote
+  the code" from "wrote about the code", which is why `no_op` and `blocked_needs_input` are
+  explicit categories.
 - **The Jev key can't be a machine-level setting once this is a shared skill.** The original
   plan treated `TYPESAFE_API_KEY` as an environment variable the harness reads — fine for
   one developer's machine, wrong for a skill teammates install independently. Each person

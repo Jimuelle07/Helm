@@ -103,15 +103,63 @@ Verified contracts as of this writing:
 | `opencode` | `opencode run "<prompt>"` |
 | `copilot` | `copilot -p "<prompt>"` |
 
+## `auth_check` -- proving the tool can actually run
+
+Installing a CLI and authenticating it are separate acts. A tool that was never logged in
+passes a `--version` probe and then fails on its first model call, which surfaces as a
+confusing runtime error instead of a clear precondition failure. `auth_check` lets the
+probe ask the tool itself:
+
+```jsonc
+"auth_check": {
+  "argv": ["codex", "login", "status"],   // argv[0] is replaced with the resolved path
+  "ok_pattern": "logged in",               // regex, case-insensitive
+  "fail_pattern": "not logged in",         // tested FIRST -- see below
+  "timeout": 30
+}
+```
+
+Resolution order, and the reasoning behind it:
+
+1. **`fail_pattern` is tested before `ok_pattern`.** A CLI can exit 0 while printing "not
+   logged in", and `"not logged in"` also contains `"logged in"`. The explicit negative has
+   to win, or a substring match silently inverts the verdict.
+2. **`ok_pattern` match** -> `authenticated`.
+3. **`ok_pattern` declared but nothing matched** -> `unknown`, *not* authenticated. The
+   tool's output format may simply have changed in a new version, and assuming "fine" there
+   is how you route to a dead agent.
+4. **No patterns declared** -> exit code decides.
+5. **Timeout, crash, or no `auth_check` at all** -> `unknown`.
+
+Only state 2's opposite -- a definitive `unauthenticated` -- removes an agent from routing.
+Everything ambiguous stays routable with a caveat, because a check that *cannot answer* must
+not be allowed to condemn a working tool.
+
+Verified auth commands:
+
+| Agent | Command | Success signal |
+|---|---|---|
+| `claude` | `claude auth status` | JSON `"loggedIn": true` |
+| `codex` | `codex login status` | `Logged in using ChatGPT` |
+| `cursor-agent` | `cursor-agent status` | `Logged in as ...` |
+| `opencode` | `opencode auth list` | `N credentials` (`0 credentials` = logged out) |
+
+`gemini`, `aider` and `copilot` have no read-only status command I could verify, so they
+carry no `auth_check` and stay `unknown`. That is the correct outcome: unknown never blocks.
+
+Add a `LOGIN_HINTS` entry in `probe.py` alongside any new `auth_check` -- a diagnosis is
+only useful with the remedy attached.
+
 ## Adding an agent
 
 1. Copy the closest existing card and edit it.
 2. Confirm the headless invocation against `--help`; set `contract_verified` honestly.
 3. Write a `competence` line that contrasts with every existing card.
 4. Fill in all ten `task_fit` values.
-5. Run `python -m unittest discover -s tests` — the card tests will catch a missing field,
+5. Add an `auth_check` and a `LOGIN_HINTS` entry if the CLI has a status command
+6. Run `python -m unittest discover -s tests` — the card tests will catch a missing field,
    a bad `context_class`, or a duplicated competence line.
-6. Re-probe with `--refresh`, since the registry caches for 24 hours.
+7. Re-probe with `--refresh`, since the registry caches for 24 hours.
 
 ## A note on `auth`
 

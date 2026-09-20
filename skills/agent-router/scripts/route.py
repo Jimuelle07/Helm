@@ -31,14 +31,11 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import jev  # noqa: E402
 import keystore  # noqa: E402
 import probe  # noqa: E402
 
-JEV_ENDPOINT = os.environ.get("TYPESAFE_ENDPOINT", "https://api.typesafe.ai/v1/systemone")
-# Pinned, not `jev-latest`: thresholds calibrated against one model version are
-# silently invalidated by an alias shift. The pin lives next to what it protects.
-JEV_MODEL = os.environ.get("TYPESAFE_MODEL", "jev-1.13.0")
-JEV_TIMEOUT = 15
+JEV_MODEL = jev.MODEL
 TRACE_PATH = Path(
     os.environ.get("AGENT_ROUTER_TRACES")
     or Path.home() / ".cache" / "agent-router" / "decisions.jsonl"
@@ -177,86 +174,15 @@ THRESHOLDS = {
 
 
 # =========================================================================== #
-# Jev client
+# Jev client -- see jev.py. Re-exported here so the thresholds, the questions
+# and the failure type all read as one policy surface.
 # =========================================================================== #
 
-class JevUnavailable(Exception):
-    """Raised whenever Jev cannot answer, for any reason. Always caught."""
-
-
-def _encode_question(q: dict) -> dict:
-    """Wire encoding for one question.
-
-    NOTE: inferred from the documented SDK surface (Choice/Score/Noul with
-    `instructions` plus `criteria`), not verified against a live endpoint --
-    this project has no configured API key to test against. If the raw-HTTP
-    path 400s, check the current schema at docs.typesafe.ai and fix it here;
-    the SDK path below is authoritative and unaffected. Any failure falls
-    through to the deterministic scorer, so a wrong guess degrades the answer
-    rather than breaking the tool.
-    """
-    return {k: v for k, v in q.items() if v is not None}
+JevUnavailable = jev.JevUnavailable
 
 
 def ask_jev(state: dict, questions: dict) -> dict:
-    # keystore resolves TYPESAFE_API_KEY env var first, then the locally stored
-    # key from `--set-api-key` -- see keystore.py for the full precedence.
-    api_key = keystore.get_api_key()
-    if not api_key:
-        raise JevUnavailable(
-            "no TypeSafe API key configured. Run "
-            "`python route.py --set-api-key sk-...` once, or set TYPESAFE_API_KEY."
-        )
-
-    # Prefer the official SDK when it is installed: it owns the wire format.
-    try:
-        from typesafe_sdk import Choice, Noul, Score, TypeSafeClient  # type: ignore
-
-        built = {}
-        for key, q in questions.items():
-            if q["type"] == "choice":
-                built[key] = Choice(instructions=q["instructions"], criteria=q["criteria"])
-            elif q["type"] == "score":
-                built[key] = Score(instructions=q["instructions"], criteria=q["criteria"])
-            else:
-                built[key] = Noul(instructions=q["instructions"])
-        # The documented SDK usage (context.md) constructs TypeSafeClient() with
-        # no arguments, implying it reads TYPESAFE_API_KEY from the environment.
-        # A key entered via --set-api-key lives only in our local credential
-        # file, not the environment, so export it for this process before the
-        # client reads it. This process exits right after this call either way,
-        # so nothing leaks back to the invoking shell.
-        os.environ.setdefault("TYPESAFE_API_KEY", api_key)
-        client = TypeSafeClient()
-        resp = client.system_one(state=state, questions=built, model=JEV_MODEL)
-        return json.loads(resp.model_dump_json()) if hasattr(resp, "model_dump_json") else dict(resp)
-    except ImportError:
-        pass
-    except Exception as exc:  # SDK present but the call failed
-        raise JevUnavailable(f"SDK call failed: {exc}") from exc
-
-    payload = json.dumps({
-        "model": JEV_MODEL,
-        "state": state,
-        "questions": {k: _encode_question(q) for k, q in questions.items()},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        JEV_ENDPOINT,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=JEV_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")[:300]
-        raise JevUnavailable(f"HTTP {exc.code}: {body}") from exc
-    except Exception as exc:
-        raise JevUnavailable(str(exc)) from exc
+    return jev.ask(state, questions)
 
 
 # =========================================================================== #
@@ -507,33 +433,25 @@ def render_command(card: dict, intent: str) -> list[str]:
 # Execution (opt-in, gated)
 # =========================================================================== #
 
-def execute(route: dict, card: dict, cwd: Path) -> int:
-    argv = list(route["command"])
-    resolved = card.get("path")
-    if resolved:
-        argv[0] = resolved
+def execute(route: dict, card: dict, cwd: Path, timeout: float = 900.0,
+            watch: bool = False) -> tuple[int, dict]:
+    """Hand the task to the chosen agent and let Jev judge the result.
 
-    # Windows runs .cmd/.bat through cmd.exe, which re-parses the argument
-    # string -- so an untrusted prompt containing shell metacharacters is a
-    # command-injection vector (the BatBadBut class of bug, CVE-2024-24576).
-    # Refuse rather than sanitise: quoting rules for cmd.exe are genuinely
-    # hard to get right, and the user can still run the command themselves.
-    if os.name == "nt" and resolved and Path(resolved).suffix.lower() in {".cmd", ".bat"}:
-        if re.search(r'[&|<>^"%!]', " ".join(argv[1:])):
-            print(
-                "refusing to execute: the prompt contains shell metacharacters and "
-                f"{Path(resolved).name} is a batch script, which Windows re-parses "
-                "through cmd.exe. Run the printed command yourself, or rephrase.",
-                file=sys.stderr,
-            )
-            return 2
+    Execution goes through supervise.py rather than a bare subprocess.run so
+    that dispatch and completion-judging stay one path. The orchestrating model
+    gets back a small verdict object; the worker's transcript lands on disk and
+    stays out of its context unless it asks for it.
+    """
+    import supervise  # imported here: supervise imports probe, route imports both
 
-    print(f"$ {' '.join(argv)}\n", file=sys.stderr)
-    try:
-        return subprocess.run(argv, cwd=str(cwd), shell=False).returncode
-    except OSError as exc:
-        print(f"failed to launch {argv[0]}: {exc}", file=sys.stderr)
-        return 127
+    verdict = supervise.supervise(
+        agent_name=route["agent"], task=route["_intent"], cwd=cwd,
+        timeout=timeout, watch=watch, poll_interval=30.0,
+        registry={"agents": [card], "local_inference": {"available": False, "vram_gb": None}},
+    )
+    print("", file=sys.stderr)
+    print(supervise.render(verdict), file=sys.stderr)
+    return (0 if verdict["outcome"] in ("done", "uncertain") else 1), verdict
 
 
 # =========================================================================== #
@@ -637,6 +555,11 @@ def main() -> int:
     ap.add_argument("--repo", default=".", help="repository root for context (default: cwd)")
     ap.add_argument("--json", action="store_true", help="emit the full decision as JSON")
     ap.add_argument("--execute", action="store_true", help="run the agent if all gates pass")
+    ap.add_argument("--timeout", type=float, default=900.0,
+                    help="seconds to allow the agent when --execute (default: 900)")
+    ap.add_argument("--watch", action="store_true",
+                    help="with --execute, poll while running and stop early if the "
+                         "agent gets stuck or waits for input")
     ap.add_argument("--refresh", action="store_true", help="re-probe instead of using the cache")
     ap.add_argument("--no-trace", action="store_true", help="do not append to the trace log")
     keystore.add_key_args(ap)
@@ -684,7 +607,10 @@ def main() -> int:
                   "Run the printed command yourself to override.", file=sys.stderr)
             return 3
         card = next(a for a in routable if a["name"] == route["agent"])
-        return execute(route, card, repo_root)
+        route["_intent"] = args.intent
+        rc, _verdict = execute(route, card, repo_root,
+                               timeout=args.timeout, watch=args.watch)
+        return rc
     return 0
 
 

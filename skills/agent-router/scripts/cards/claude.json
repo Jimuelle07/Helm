@@ -1,13 +1,63 @@
 {
   "name": "claude",
   "display_name": "Claude Code",
-  "bin_names": ["claude"],
+  "bin_names": [
+    "claude"
+  ],
   "competence": "Long-horizon multi-file work: architecture, cross-cutting refactors, and tasks where the plan itself has to be worked out before any code is written",
-  "strengths": ["holds many files in working memory at once", "discovers a plan from a vague brief", "strong test-and-iterate loop", "large context"],
-  "weaknesses": ["more expensive per task than narrow tools", "overkill for a one-line fix"],
-  "task_fit": {"scaffold": 5, "feature": 5, "bugfix": 4, "refactor": 5, "test": 4, "docs": 4, "review": 4, "research": 4, "ops": 3, "other": 3},
+  "strengths": [
+    "holds many files in working memory at once",
+    "discovers a plan from a vague brief",
+    "strong test-and-iterate loop",
+    "large context"
+  ],
+  "weaknesses": [
+    "more expensive per task than narrow tools",
+    "overkill for a one-line fix"
+  ],
+  "task_fit": {
+    "scaffold": 5,
+    "feature": 5,
+    "bugfix": 4,
+    "refactor": 5,
+    "test": 4,
+    "docs": 4,
+    "review": 4,
+    "research": 4,
+    "ops": 3,
+    "other": 3
+  },
   "context_class": "xlarge",
-  "auth": {"modes": ["subscription", "api_key"], "env": ["ANTHROPIC_API_KEY"], "config": ["~/.claude/settings.json"]},
-  "headless": {"argv": ["claude", "-p", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
-  "contract_verified": true
+  "auth": {
+    "modes": [
+      "subscription",
+      "api_key"
+    ],
+    "env": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "config": [
+      "~/.claude/settings.json"
+    ]
+  },
+  "headless": {
+    "argv": [
+      "claude",
+      "-p",
+      "{prompt}"
+    ],
+    "model_flag": "--model",
+    "cwd_aware": true
+  },
+  "contract_verified": true,
+  "auth_check": {
+    "argv": [
+      "claude",
+      "auth",
+      "status"
+    ],
+    "ok_pattern": "\"loggedIn\"\\s*:\\s*true",
+    "fail_pattern": "\"loggedIn\"\\s*:\\s*false",
+    "timeout": 30
+  }
 }

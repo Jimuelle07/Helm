@@ -74,6 +74,58 @@ respected.
 unreachable through a Choice by construction; it is defence in depth against a future edit
 that widens the answer space.
 
+## The second question set: did the worker finish?
+
+`supervise.py` owns a separate set, asked after (or during) a dispatched run. It exists for
+a token reason as much as a quality one: deciding "is this done?" by having the
+orchestrating model read the worker's transcript is the most expensive thing in the whole
+loop. Transcripts run to tens of thousands of tokens, and reading one both costs money and
+permanently fills the orchestrator's context with build noise.
+
+At $0.042 per million input tokens with output free, Jev judges a 50k-token transcript for
+roughly a fifth of a cent and returns a few hundred bytes. The transcript goes to disk; the
+orchestrator gets the conclusion and a path.
+
+| Key | Type | Why it exists |
+|---|---|---|
+| `status` | Choice(5) | completed / partial / no_op / blocked_needs_input / failed |
+| `task_satisfied` | Noul | the work was *done*, not merely described or planned |
+| `needs_human` | Noul | direct escalation signal |
+| `awaiting_input` | Noul | the run is waiting on an answer that cannot arrive headlessly |
+| `failure_severity` | Score(4) | is the workspace likely left dirty? |
+
+### Why not just check the exit code
+
+Because it is blind in both directions, and the interesting failures are the ones it cannot
+see at all. Coding agents exit 0 after announcing what they *would* have done without
+touching a file; they exit 0 having asked a clarifying question into a headless void; they
+exit non-zero over a lint warning on otherwise finished work. `rc == 0` cannot separate
+"wrote the code" from "wrote about the code" -- which is exactly the distinction that
+decides whether to accept or retry.
+
+`no_op` and `blocked_needs_input` are in the taxonomy specifically because they are the two
+an exit code is structurally incapable of reporting.
+
+### Keeping the transcript inside the budget
+
+Jev allows 32k tokens for state plus the longest question, and agent output can be far
+larger. `supervise.excerpt()` keeps a 5k-character head and a 19k-character tail, weighted
+to the tail because that is where an agent says what it did, what broke, and what it is
+waiting for -- the head is mostly the task echoing back. ANSI escape codes are stripped
+first: CLI tools colour their output even when piped, and those codes are pure token waste
+that also breaks pattern matching.
+
+### Mid-run polling
+
+`--watch` asks a deliberately narrower pair of questions (`made_progress`, `awaiting_input`)
+on an interval while the run is still in flight. Mid-run, those are the only two answers
+that can change what we do -- keep waiting, or stop -- so asking the full completion set on
+every poll would be spending latency on questions whose answers are not yet meaningful.
+
+This is also a genuine information dependency rather than a fan-out: the poll asks about
+progress *since the previous excerpt*, so the earlier observation has to be in state. That
+makes it a serial call by construction, which is the distinction drawn above.
+
 ## API shape
 
 | Item | Value |

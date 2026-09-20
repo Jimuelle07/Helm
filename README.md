@@ -18,10 +18,12 @@ and not one of them can name the other six.
 
 > **The probe observes. Jev judges. The chosen agent generates. Code composes and executes.**
 
-1. **Observe** — `probe.py` reads the hardware and discovers installed agent CLIs. No model calls.
+1. **Observe** — `probe.py` reads the hardware, discovers installed agent CLIs, and asks each
+   one whether it is actually logged in. No model calls.
 2. **Judge** — Jev answers seven typed questions about the task in one parallel request.
 3. **Compose** — thresholds and gates turn typed answers into a route. Pure, and fully unit-tested.
-4. **Act** — invoke the chosen agent headless, but only if every gate passes.
+4. **Act** — `supervise.py` dispatches the chosen agent and lets Jev judge whether it finished,
+   so the orchestrating model never has to read the worker's transcript.
 
 The keystone: the answer space handed to Jev is built **from what the probe found**, so
 recommending an agent you do not have is structurally impossible rather than merely unlikely.
@@ -60,10 +62,13 @@ unattended.
 | `skills/agent-router/` | The distributable agent skill |
 | `skills/agent-router/SKILL.md` | Workflow and how to present a recommendation |
 | `skills/agent-router/scripts/probe.py` | Hardware + PATHEXT-aware agent discovery |
-| `skills/agent-router/scripts/route.py` | Question set, thresholds, Jev client, fallback, executor |
+| `skills/agent-router/scripts/route.py` | Routing question set, thresholds, fallback scorer |
+| `skills/agent-router/scripts/supervise.py` | Dispatch + Jev-judged completion |
+| `skills/agent-router/scripts/jev.py` | Shared Jev client |
+| `skills/agent-router/scripts/keystore.py` | Per-user API key storage |
 | `skills/agent-router/scripts/cards/` | Capability cards — declared knowledge, one file per agent |
 | `skills/agent-router/references/` | Card schema, Jev decision layer, calibration |
-| `tests/test_router.py` | 31 tests over the pure decision layer |
+| `tests/` | 124 tests; pure layers exhaustively, plus real dispatch |
 
 ## Docs
 
@@ -71,6 +76,20 @@ unattended.
 - [`docs/system-design.md`](docs/system-design.md) — the build spec: layers, questions, thresholds
 - [`docs/context.md`](docs/context.md) — research notes on what Jev is and is not
 - [`docs/machine-profile.md`](docs/machine-profile.md) — generated snapshot of the development box
+
+## Two failures it exists to prevent
+
+**Routing to a CLI that was never logged in.** Installing an agent and authenticating it are
+separate acts, and people routinely do only the first. The CLI passes a `--version` check and
+then fails on its first model call. `probe.py` asks each tool's own status command; anything
+that reports logged out is pulled from routing and shown with its fix. The rule is asymmetric
+on purpose — *we couldn't find a credential* never blocks (tokens live in keychains no probe
+can read); only *the tool said it's logged out* does.
+
+**Spending orchestrator tokens on "is it done yet?"** An agent transcript runs to tens of
+thousands of tokens. Jev reads it for a fraction of a cent and returns a few hundred bytes;
+the transcript goes to disk. This also catches what an exit code cannot — agents exit 0 after
+describing work they never did, and exit 0 after asking a question into a headless void.
 
 ## Status
 

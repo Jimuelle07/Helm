@@ -1,13 +1,63 @@
 {
   "name": "codex",
   "display_name": "OpenAI Codex CLI",
-  "bin_names": ["codex"],
+  "bin_names": [
+    "codex"
+  ],
   "competence": "Well-scoped implementation and debugging inside a codebase that already exists, especially iterating against a failing test until it passes",
-  "strengths": ["tight implement-run-fix loop", "good at reading stack traces", "selectable reasoning effort", "sandboxed execution"],
-  "weaknesses": ["prefers a concrete target over an open brief", "less suited to greenfield architecture"],
-  "task_fit": {"scaffold": 3, "feature": 4, "bugfix": 5, "refactor": 4, "test": 5, "docs": 3, "review": 4, "research": 2, "ops": 3, "other": 3},
+  "strengths": [
+    "tight implement-run-fix loop",
+    "good at reading stack traces",
+    "selectable reasoning effort",
+    "sandboxed execution"
+  ],
+  "weaknesses": [
+    "prefers a concrete target over an open brief",
+    "less suited to greenfield architecture"
+  ],
+  "task_fit": {
+    "scaffold": 3,
+    "feature": 4,
+    "bugfix": 5,
+    "refactor": 4,
+    "test": 5,
+    "docs": 3,
+    "review": 4,
+    "research": 2,
+    "ops": 3,
+    "other": 3
+  },
   "context_class": "large",
-  "auth": {"modes": ["subscription", "api_key"], "env": ["OPENAI_API_KEY"], "config": ["~/.codex/auth.json"]},
-  "headless": {"argv": ["codex", "exec", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
-  "contract_verified": true
+  "auth": {
+    "modes": [
+      "subscription",
+      "api_key"
+    ],
+    "env": [
+      "OPENAI_API_KEY"
+    ],
+    "config": [
+      "~/.codex/auth.json"
+    ]
+  },
+  "headless": {
+    "argv": [
+      "codex",
+      "exec",
+      "{prompt}"
+    ],
+    "model_flag": "--model",
+    "cwd_aware": true
+  },
+  "contract_verified": true,
+  "auth_check": {
+    "argv": [
+      "codex",
+      "login",
+      "status"
+    ],
+    "ok_pattern": "logged in",
+    "fail_pattern": "not logged in|no credentials|please run .*login",
+    "timeout": 30
+  }
 }

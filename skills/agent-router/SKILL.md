@@ -1,16 +1,17 @@
 ---
 name: agent-router
 description: >
-  Discovers which coding-agent CLIs and models are actually installed on this machine
+  Discovers which coding-agent CLIs are actually installed AND logged in on this machine
   (Claude Code, Codex, Cursor Agent, Gemini, Aider, OpenCode, Copilot, Ollama and others)
-  along with its CPU/RAM/VRAM, then uses TypeSafe Jev as a typed decision layer to pick
-  the best available agent for a task and hand it off. Use this whenever the user asks
-  which model or agent should handle something, wants to delegate or route work to another
-  CLI agent, asks what agents or models are available on their machine, compares agents
-  ("is Claude or Codex better for this refactor?"), asks whether a task can run on a local
-  model, or wants a build orchestrated across several agents. Also use it before starting
-  a substantial build when picking the wrong tool would be expensive — even if the user
-  never names an agent — because a coding agent otherwise cannot see the sibling agents
+  along with its CPU/RAM/VRAM, then uses TypeSafe Jev as a typed decision layer to pick the
+  best available agent, dispatch the task, and judge whether the worker actually finished.
+  Use this whenever the user asks which model or agent should handle something, wants to
+  delegate or route work to another CLI agent, asks what agents or models are available on
+  their machine, compares agents ("is Claude or Codex better for this refactor?"), asks
+  whether a task can run on a local model, hits an agent CLI that is installed but failing
+  to call its model, or wants a build orchestrated across several agents. Also use it before
+  starting a substantial build when picking the wrong tool would be expensive — even if the
+  user never names an agent — because a coding agent otherwise cannot see the sibling agents
   installed right next to it.
 ---
 
@@ -82,6 +83,18 @@ hours (`--refresh` to force a re-probe; `--json` for the raw registry).
 Run this whenever the user asks what they have available, or before any routing decision.
 It calls no models, so it is cheap and safe to run eagerly.
 
+**It also asks each CLI whether it is logged in.** Installing a coding agent and
+authenticating it are separate acts, and people routinely do the first without the second —
+the CLI then looks perfectly healthy until the moment it tries to call a model. Agents that
+their own status command reports as logged out appear under `INSTALLED BUT NOT
+AUTHENTICATED` with the exact fix command, and are excluded from routing so no task is
+handed to an agent that cannot run it.
+
+If you see that block, tell the user which agent and give them the one-line fix. They log
+in, and the next run picks it up immediately — logged-out agents are re-checked on every
+invocation rather than waiting out the cache. Use `--no-verify-auth` to skip the check when
+you only need a fast inventory.
+
 ### 2. Route a task
 
 ```bash
@@ -95,11 +108,45 @@ declines to auto-execute — precisely which gate stopped it.
 Useful flags: `--repo PATH` for repository context, `--json` for the full verdict,
 `--execute` to actually run the agent.
 
-### 3. Hand off (only when it is warranted)
+### 3. Hand off, and let Jev tell you when it is done
 
 Default behaviour is to recommend, not to run. Prefer showing the user the command and
 letting them decide. Reach for `--execute` only when the user has clearly asked you to
 just do it, and even then the gates in `scripts/route.py` can still refuse.
+
+When you do dispatch, go through the supervisor rather than running the agent yourself:
+
+```bash
+python scripts/supervise.py codex "fix the failing test in src/parser.py"
+python scripts/supervise.py claude "..." --watch --timeout 900
+```
+
+**Do not read the worker's transcript to decide whether it finished.** That is the single
+most expensive thing you can do here: agent transcripts run to tens of thousands of tokens,
+and reading one costs real money *and* permanently fills your context with build noise you
+then carry for the rest of the session.
+
+`supervise.py` hands the transcript to Jev instead — input is $0.042 per million tokens and
+output is free, so judging a 50k-token run costs a fraction of a cent. What comes back to
+you is a few hundred bytes:
+
+```
+DONE -- codex (completed)
+  Edited src/parser.py and ran the suite: 14 passed
+  confidence 0.88 | satisfied 0.91 | needs_human 0.08 | awaiting_input 0.02
+  exit 0 after 47.2s | judged by jev
+  next: accept
+  full transcript: /tmp/agent-router-runs/codex-1758...log
+```
+
+Act on `next`, and only open the transcript if it says `review` or you have a specific
+reason. That choice — the log being somewhere you *can* look rather than something that
+arrives unbidden — is where the saving actually comes from.
+
+`--watch` polls the run while it is in flight and stops it early if Jev sees it going in
+circles or waiting for input. That second case is worth the flag on its own: an agent
+running headless sometimes asks a clarifying question and then waits for an answer that
+can never arrive, and without `--watch` it burns the entire timeout before anyone notices.
 
 ## Reading the output
 
@@ -114,6 +161,23 @@ The `mode` field is the decision:
 
 Always tell the user **which brain judged it**. The `source` field is either `jev` or
 `fallback`, and a fallback verdict is a materially weaker claim — see below.
+
+For a dispatched run, `supervise.py` returns `outcome` and `next`:
+
+| Outcome | Meaning | `next` |
+|---|---|---|
+| `done` | Task carried out, high confidence | `accept` |
+| `uncertain` | Looks finished but the judge is not confident | `review` |
+| `incomplete` | Claimed done, but the task was not actually satisfied | `review` |
+| `no_op` | The agent described the work instead of doing it | `retry` |
+| `stuck` | Waiting on input that cannot arrive headlessly | `ask_user` |
+| `failed` | Errored out | `retry` |
+| `timeout` | Killed at the deadline; work may be half-applied | `escalate` |
+| `error` | Precondition failed — not installed, not logged in, no contract | `escalate` |
+
+`no_op` and `stuck` are the two that matter most, because an exit code cannot see either.
+Agents exit 0 after announcing what they *would* do, and exit 0 after asking a question
+into the void. If you were checking `rc == 0`, both would read as success.
 
 ## When Jev is unavailable
 
@@ -163,14 +227,20 @@ Load these only when the task calls for them:
 - `references/calibration.md` — the thresholds, why they are currently guesses, and how to fit them
   against recorded traces
 
-## Two things worth knowing
+## Three things worth knowing
 
-**Undetected credentials are not absent credentials.** The probe reports when it cannot
-find an API key or config for an agent, but it does *not* exclude that agent — plenty of
-CLIs keep tokens in an OS keychain or a browser session. Treat it as a caveat to mention,
-not a reason to route elsewhere.
+**Undetected credentials are not absent credentials.** The probe distinguishes two things
+that are easy to conflate. *We could not find a credential* means nothing — tokens live in
+keychains and browser sessions no probe can enumerate — so it never blocks. *The tool's own
+status command said it is logged out* is authoritative, and does block. Only the second is
+a reason to route elsewhere; mention the first as a caveat and move on.
 
 **Every decision is logged** to `~/.cache/agent-router/decisions.jsonl`, because the
-thresholds in `route.py` are honest guesses until there are real traces to fit them
-against. If the user disagrees with a routing call, that disagreement is the valuable
-signal — note it, and point them at `references/calibration.md`.
+thresholds in `route.py` and `supervise.py` are honest guesses until there are real traces
+to fit them against. If the user disagrees with a routing call, that disagreement is the
+valuable signal — note it, and point them at `references/calibration.md`.
+
+**Nothing here auto-executes on a weak signal.** Whenever Jev is unavailable, both the
+router and the supervisor cap their confidence below their own accept thresholds, so a
+degraded judge can recommend but never wave work through. If you find yourself about to say
+"it's done" on a `fallback` verdict, say "it looks done, but Jev wasn't available" instead.

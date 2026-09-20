@@ -1,13 +1,16 @@
 # Calibration
 
-Every threshold in `scripts/route.py` is currently an **uncalibrated guess**. This file
-explains what they do, why they are guesses, and how to replace them with fitted numbers.
+Every threshold in `scripts/route.py` and `scripts/supervise.py` is currently an
+**uncalibrated guess**. This file explains what they do, why they are guesses, and how to
+replace them with fitted numbers.
 
 Being explicit about this matters more than it might seem. A threshold that looks like
 `0.75` carries an air of having been measured. None of these have been. Until there are
 traces to fit against, the honest posture is to prefer *less* automation, not more.
 
 ## The thresholds
+
+### Routing thresholds (`route.py`)
 
 | Name | Value | Effect when crossed |
 |---|---|---|
@@ -18,14 +21,31 @@ traces to fit against, the honest posture is to prefer *less* automation, not mo
 | `IRREVERSIBLE_NOUL` | 0.40 | Below: require explicit human approval |
 | `FALLBACK_CONFIDENCE_CAP` | 0.50 | Hard ceiling on any non-Jev verdict |
 
+### Completion thresholds (`supervise.py`)
+
+| Name | Value | Effect |
+|---|---|---|
+| `DONE_MIN_CONFIDENCE` | 0.70 | below: report `uncertain`, ask for a look |
+| `SATISFIED_MIN_NOUL` | 0.65 | `task_satisfied` must clear this to call it done |
+| `NEEDS_HUMAN_NOUL` | 0.50 | above: escalate |
+| `AWAITING_INPUT_NOUL` | 0.60 | above: the run is stuck, not working |
+| `MAX_FAILURE_SEVERITY` | 2.0 | above: warn the workspace may be dirty |
+| `FALLBACK_CONFIDENCE_CAP` | 0.50 | ceiling on any non-Jev verdict |
+| `STUCK_POLLS_BEFORE_KILL` | 3 | consecutive no-progress polls before aborting a `--watch` run |
+
+The asymmetry to preserve when tuning these: **wrongly reporting "done" is much more
+expensive than one unnecessary review.** A false "done" means broken work is silently
+accepted and discovered later, out of context; a false "review" costs one glance at a log.
+Fit these for high recall on the not-actually-done cases.
+
+Note that `FALLBACK_CONFIDENCE_CAP` sits below `DONE_MIN_CONFIDENCE` in *both* files. That
+single inequality is what guarantees a degraded judge can never reach the automatic path,
+independently of the explicit `source != "jev"` checks. Two mechanisms enforce the same
+rule because it is the property least worth losing to a refactor.
+
 Gates are **conjunctive and fail-closed**: every one must pass for `mode: "auto"`. Any
 single unmet gate downgrades to `recommend`, and the unmet gates are printed so the user
 can see exactly what stopped it.
-
-`FALLBACK_CONFIDENCE_CAP` sits below `AUTO_ROUTE_MIN_CONFIDENCE` deliberately. That single
-inequality is what guarantees a fallback verdict can never reach `auto`, independently of
-the explicit `source != "jev"` gate. Two mechanisms enforce the same rule because it is
-the property most worth not losing to a refactor.
 
 ## Why guesses are acceptable *for now*
 
@@ -36,8 +56,12 @@ better than both, provided two conditions hold:
 1. The numbers are labelled as unfitted everywhere they appear.
 2. Traces are recorded from day one, so they *can* be fitted later.
 
-Both hold. `route.py` writes one JSONL row per decision to
+Both hold. `route.py` writes one JSONL row per routing decision to
 `~/.cache/agent-router/decisions.jsonl` (override with `AGENT_ROUTER_TRACES`).
+
+`supervise.py` does not yet write traces of its own -- completion verdicts are currently
+only observable in its output and in the per-run logs under `AGENT_ROUTER_RUNS`. Wiring the
+same trace writer into it is the obvious next step before its thresholds can be fitted.
 
 ## What a trace row contains
 

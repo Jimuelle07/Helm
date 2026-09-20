@@ -30,6 +30,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -79,6 +80,16 @@ def run(argv: list[str], timeout: int = 10) -> tuple[int, str]:
 
 def expand(p: str) -> Path:
     return Path(os.path.expanduser(os.path.expandvars(p)))
+
+
+# CLI tools colour their output even when piped. Those escape codes break
+# pattern matching here and waste judge tokens downstream, so strip them once
+# at the boundary rather than defending against them everywhere.
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI_RE.sub("", text)
 
 
 # --------------------------------------------------------------------------- #
@@ -277,7 +288,14 @@ def probe_auth(card: dict) -> dict:
         "modes": auth.get("modes", []),
         "env_vars_set": env_present,
         "config_present": cfg_present,
+        # Heuristic only: "we spotted something that looks like a credential".
+        # Never sufficient to disqualify -- see the faultline note by routable().
         "ready": bool(env_present or cfg_present) or auth.get("modes") == ["none"],
+        # Filled in by verify_all_auth() when a real check runs.
+        "state": "unknown",
+        "detail": "not verified",
+        "verified": False,
+        "checked_at": None,
     }
 
 
@@ -322,20 +340,156 @@ def probe_agent(card: dict, want_version: bool) -> dict:
     return entry
 
 
+# --------------------------------------------------------------------------- #
+# auth verification -- the faultline
+#
+# Installing a CLI and authenticating it are separate acts, and users routinely
+# do the first without the second. An unauthenticated agent looks perfectly
+# healthy to a `--version` probe and then fails the moment it is asked to call
+# a model, which wastes a whole dispatch cycle and surfaces as a confusing
+# runtime error rather than a clear precondition failure.
+#
+# The faultline is the distinction between two things that are easy to
+# conflate:
+#
+#   absence of evidence   -- we could not find a credential. Means nothing:
+#                            tokens live in OS keychains and browser sessions
+#                            we cannot enumerate. NEVER disqualifies.
+#   evidence of absence   -- the tool's own status command said it is not
+#                            logged in. That is authoritative. DOES disqualify.
+#
+# Only a card's `auth_check` can produce the second. Everything else produces
+# "unknown", which is reported as a caveat and left routable. On this machine
+# the heuristic called cursor-agent "no credentials detected" while
+# `cursor-agent status` reported a live session -- a false negative that would
+# have dropped a working agent had the heuristic been allowed to gate.
+# --------------------------------------------------------------------------- #
+
+# A diagnosis is only useful with the remedy attached. Keyed by card name; an
+# agent without an entry simply gets no hint rather than a guessed one.
+LOGIN_HINTS = {
+    "claude": "claude auth login",
+    "codex": "codex login",
+    "cursor-agent": "cursor-agent login",
+    "opencode": "opencode auth login",
+    "copilot": "copilot login",
+    "gemini": "run `gemini` once and pick an auth method, or set GEMINI_API_KEY",
+    "aider": "set OPENAI_API_KEY or ANTHROPIC_API_KEY in your environment",
+    "goose": "goose configure",
+    "qwen": "run `qwen` once to authenticate, or set DASHSCOPE_API_KEY",
+    "amp": "amp login",
+    "droid": "droid login",
+    "ollama": "ollama pull <model> to download at least one model",
+}
+
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def _redact(text: str) -> str:
+    """Auth status output often names the logged-in account. The registry gets
+    written to disk and pasted into issues, so strip addresses out of it."""
+    return EMAIL_RE.sub("<redacted>", text)
+
+
+def verify_auth(card: dict, resolved: str) -> dict:
+    """Ask the tool itself whether it is authenticated.
+
+    Returns state in {"authenticated", "unauthenticated", "unknown"} plus a
+    short human-readable detail. Anything ambiguous resolves to "unknown" --
+    a check that cannot answer must not be allowed to condemn a working agent.
+    """
+    check = card.get("auth_check")
+    if not check:
+        return {"state": "unknown", "detail": "no auth status command for this CLI",
+                "verified": False}
+
+    argv = list(check.get("argv") or [])
+    if not argv:
+        return {"state": "unknown", "detail": "malformed auth_check", "verified": False}
+    argv[0] = resolved  # always invoke the path we resolved, not a bare name
+
+    rc, out = run(argv, timeout=int(check.get("timeout", 30)))
+    if rc == 124:
+        return {"state": "unknown", "detail": "auth check timed out", "verified": False}
+
+    blob = strip_ansi(out)
+    fail_pat, ok_pat = check.get("fail_pattern"), check.get("ok_pattern")
+
+    # fail_pattern is tested first: a tool can exit 0 while printing "not
+    # logged in", and the explicit negative is more trustworthy than rc.
+    if fail_pat and re.search(fail_pat, blob, re.I):
+        return {"state": "unauthenticated", "detail": _first_line(blob) or "reported not logged in",
+                "verified": True}
+    if ok_pat and re.search(ok_pat, blob, re.I):
+        return {"state": "authenticated", "detail": _first_line(blob), "verified": True}
+    if ok_pat:
+        # An ok_pattern was declared and did not match. Treat a clean exit as
+        # ambiguous rather than authenticated -- the output shape may simply
+        # have changed in a new CLI version, and guessing "fine" here is how
+        # you route to a dead agent.
+        return {"state": "unknown",
+                "detail": "auth status output not recognised (CLI may have changed)",
+                "verified": False}
+    if rc == 0:
+        return {"state": "authenticated", "detail": _first_line(blob), "verified": True}
+    return {"state": "unauthenticated", "detail": _first_line(blob) or f"exit code {rc}",
+            "verified": True}
+
+
+def _first_line(text: str) -> str:
+    for line in text.splitlines():
+        line = _redact(line.strip())
+        if line:
+            return line[:100]
+    return ""
+
+
+def verify_all_auth(agents: list[dict], cards_by_name: dict, only: set[str] | None = None) -> None:
+    """Run every auth check in parallel and merge the results in place.
+
+    Parallel because these are independent subprocess round-trips: seven checks
+    run in about as long as the slowest one instead of the sum. `only` restricts
+    the sweep to named agents, which is what makes the re-check-after-login path
+    cheap (see load_cached).
+    """
+    targets = [
+        a for a in agents
+        if a["installed"] and a.get("path")
+        and (only is None or a["name"] in only)
+        and cards_by_name.get(a["name"], {}).get("auth_check")
+    ]
+    if not targets:
+        return
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
+        futures = {
+            pool.submit(verify_auth, cards_by_name[a["name"]], a["path"]): a
+            for a in targets
+        }
+        for fut in futures:
+            agent = futures[fut]
+            try:
+                result = fut.result()
+            except Exception as exc:  # a broken check must never sink the probe
+                result = {"state": "unknown", "detail": f"check errored: {type(exc).__name__}",
+                          "verified": False}
+            agent["auth"].update(result)
+            agent["auth"]["checked_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
 def routable(agent: dict, local: dict) -> tuple[bool, str]:
     """Can this agent actually be handed a task right now?
 
     Installed is not the same as routable: an IDE launcher has no headless
-    contract, and Ollama with no weights cannot run. Filtering here is what
-    keeps the routing answer space honest.
+    contract, Ollama with no weights cannot run, and a CLI that has never been
+    logged in will fail on its first model call. Filtering here is what keeps
+    the routing answer space honest.
 
-    Note what is deliberately NOT a disqualifier: undetected credentials. Many
-    CLIs keep their tokens in an OS keychain, a browser-managed session, or a
-    path we do not enumerate, so "no key found" overwhelmingly means "we could
-    not see it" rather than "it is absent". Excluding on that basis would drop
-    working agents out of the answer space -- the same silent-shrinkage failure
-    as a PATHEXT-blind probe, just with a friendlier error message. Auth is
-    reported as a caveat on the route instead, where a human can judge it.
+    The auth rule is asymmetric on purpose -- see the faultline note above.
+    Only a definitive "unauthenticated" from the tool's own status command
+    disqualifies; an undetected credential never does.
     """
     if not agent["installed"]:
         return False, "not installed"
@@ -343,6 +497,9 @@ def routable(agent: dict, local: dict) -> tuple[bool, str]:
         return False, "did not respond to --version"
     if not agent.get("headless"):
         return False, "no headless invocation contract"
+    if agent.get("auth", {}).get("state") == "unauthenticated":
+        detail = agent["auth"].get("detail") or "not logged in"
+        return False, f"installed but not authenticated ({detail})"
     req = agent.get("requires") or {}
     if req.get("local_inference") and not local["available"]:
         return False, "requires local inference (no runtime or no models)"
@@ -405,10 +562,14 @@ def probe_repo(root: Path) -> dict:
 # registry
 # --------------------------------------------------------------------------- #
 
-def build_registry(repo_root: Path | None = None, want_version: bool = True) -> dict:
+def build_registry(repo_root: Path | None = None, want_version: bool = True,
+                   want_auth: bool = True) -> dict:
     hardware = probe_hardware()
     local = probe_local_inference(hardware)
-    agents = [probe_agent(c, want_version) for c in load_cards()]
+    cards = load_cards()
+    agents = [probe_agent(c, want_version) for c in cards]
+    if want_auth:
+        verify_all_auth(agents, {c["name"]: c for c in cards})
     for a in agents:
         ok, why = routable(a, local)
         a["routable"] = ok
@@ -440,7 +601,31 @@ def _sdk_installed() -> bool:
     return importlib.util.find_spec("typesafe_sdk") is not None
 
 
-def load_cached(refresh: bool, repo_root: Path | None, want_version: bool) -> dict:
+def _recheck_failed_auth(reg: dict) -> None:
+    """Re-verify only the agents the cache says are logged out.
+
+    Without this, telling someone "codex is installed but not authenticated"
+    would be followed by them logging in and the tool still insisting it is
+    broken until the 24h cache expired -- the worst possible moment to be
+    stale, since it is the exact loop we are asking them to close. Agents that
+    verified fine stay cached, so the common path costs nothing and only the
+    already-broken ones pay for a re-check.
+    """
+    failed = {a["name"] for a in reg.get("agents", [])
+              if a.get("auth", {}).get("state") == "unauthenticated"}
+    if not failed:
+        return
+    cards = {c["name"]: c for c in load_cards()}
+    verify_all_auth(reg["agents"], cards, only=failed)
+    local = reg.get("local_inference", {"available": False, "vram_gb": None})
+    for a in reg["agents"]:
+        ok, why = routable(a, local)
+        a["routable"] = ok
+        a["routable_reason"] = why
+
+
+def load_cached(refresh: bool, repo_root: Path | None, want_version: bool,
+                want_auth: bool = True) -> dict:
     if not refresh and CACHE_PATH.exists():
         age = time.time() - CACHE_PATH.stat().st_mtime
         if age < CACHE_TTL_SECONDS:
@@ -455,12 +640,14 @@ def load_cached(refresh: bool, repo_root: Path | None, want_version: bool) -> di
                     # Same reasoning for the API key: --set-api-key must take effect
                     # on the very next call, not after the cache expires.
                     reg["jev"] = probe_jev()
+                    if want_auth:
+                        _recheck_failed_auth(reg)
                     if repo_root:
                         reg["repo"] = probe_repo(repo_root)
                     return reg
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, KeyError):
                     pass
-    reg = build_registry(repo_root, want_version)
+    reg = build_registry(repo_root, want_version, want_auth)
     try:
         CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         CACHE_PATH.write_text(json.dumps(reg, indent=2), encoding="utf-8")
@@ -502,19 +689,37 @@ def summarize(reg: dict) -> str:
     lines.append(f"ROUTABLE AGENTS ({len(rt)})")
     for a in sorted(rt, key=lambda x: x["name"]):
         ver = a["version"] or "version unknown"
+        auth = a.get("auth", {})
         flags = []
         if not a["contract_verified"]:
             flags.append("contract unverified")
-        if not a["auth"]["ready"]:
-            flags.append("no credentials detected (may still be logged in)")
+        if auth.get("state") == "authenticated":
+            flags.append("auth verified")
+        elif not auth.get("verified"):
+            flags.append("auth unverified")
         suffix = ("  [" + "; ".join(flags) + "]") if flags else ""
         lines.append(f"  {a['name']:<14} {ver:<26}{suffix}")
         lines.append(f"  {'':<14} {a['competence']}")
 
-    if inst_only:
+    # Broken-auth agents get their own block rather than being buried in a
+    # generic "not routable" list: this is the failure users actually hit, and
+    # it is the one with a one-command fix.
+    unauth = [a for a in inst_only if a.get("auth", {}).get("state") == "unauthenticated"]
+    other = [a for a in inst_only if a not in unauth]
+
+    if unauth:
         lines.append("")
-        lines.append(f"INSTALLED BUT NOT ROUTABLE ({len(inst_only)})")
-        for a in sorted(inst_only, key=lambda x: x["name"]):
+        lines.append(f"INSTALLED BUT NOT AUTHENTICATED ({len(unauth)})  <- log in to use these")
+        for a in sorted(unauth, key=lambda x: x["name"]):
+            lines.append(f"  {a['name']:<14} {a['auth'].get('detail', 'not logged in')}")
+            hint = LOGIN_HINTS.get(a["name"])
+            if hint:
+                lines.append(f"  {'':<14} fix: {hint}")
+
+    if other:
+        lines.append("")
+        lines.append(f"INSTALLED BUT NOT ROUTABLE ({len(other)})")
+        for a in sorted(other, key=lambda x: x["name"]):
             lines.append(f"  {a['name']:<14} {a['routable_reason']}")
 
     missing = [a["name"] for a in reg["agents"] if not a["installed"]]
@@ -554,6 +759,9 @@ def main() -> int:
     ap.add_argument("--repo", metavar="PATH", help="also summarise this repository")
     ap.add_argument("--no-version", action="store_true",
                     help="skip --version probes (much faster)")
+    ap.add_argument("--no-verify-auth", action="store_true",
+                    help="skip asking each CLI whether it is logged in (faster, "
+                         "but unauthenticated agents will not be filtered out)")
     keystore.add_key_args(ap)
     args = ap.parse_args()
 
@@ -562,7 +770,8 @@ def main() -> int:
         return key_result
 
     repo_root = Path(args.repo).resolve() if args.repo else None
-    reg = load_cached(args.refresh, repo_root, not args.no_version)
+    reg = load_cached(args.refresh, repo_root, not args.no_version,
+                      want_auth=not args.no_verify_auth)
 
     if args.json:
         json.dump(reg, sys.stdout, indent=2)
