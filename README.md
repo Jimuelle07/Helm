@@ -34,10 +34,10 @@ No dependencies beyond Python 3.10+.
 
 ```bash
 # What does this machine actually have?
-python skills/agent-router/scripts/probe.py --repo .
+python skills/helm/scripts/probe.py --repo .
 
 # Which agent should handle this?
-python skills/agent-router/scripts/route.py "add retry logic to the payment client" --repo .
+python skills/helm/scripts/route.py "add retry logic to the payment client" --repo .
 
 # Run the tests
 python -m unittest discover -s tests
@@ -46,11 +46,11 @@ python -m unittest discover -s tests
 Every user configures their own Jev access — the key is never bundled with the skill:
 
 ```bash
-python skills/agent-router/scripts/route.py --set-api-key apikey_...   # once, per user
-python skills/agent-router/scripts/route.py --clear-api-key        # to remove it
+python skills/helm/scripts/route.py --set-api-key apikey_...   # once, per user
+python skills/helm/scripts/route.py --clear-api-key        # to remove it
 ```
 
-Stored locally at `~/.cache/agent-router/credentials.json` (a `TYPESAFE_API_KEY` env var
+Stored locally at `~/.cache/helm/credentials.json` (a `TYPESAFE_API_KEY` env var
 always takes precedence if set). Without a key, routing falls back to a deterministic
 scorer whose confidence is capped at 0.5 — a degraded judge may suggest, never act
 unattended.
@@ -59,20 +59,20 @@ unattended.
 
 | Path | What it is |
 |---|---|
-| `skills/agent-router/` | The distributable agent skill |
-| `skills/agent-router/SKILL.md` | Workflow and how to present a recommendation |
-| `skills/agent-router/scripts/probe.py` | Hardware + PATHEXT-aware agent discovery |
-| `skills/agent-router/scripts/route.py` | Routing question set, thresholds, fallback scorer |
-| `skills/agent-router/scripts/supervise.py` | Dispatch + Jev-judged completion |
-| `skills/agent-router/scripts/jev.py` | Shared Jev client |
-| `skills/agent-router/scripts/keystore.py` | Per-user API key storage |
-| `skills/agent-router/scripts/cards/` | Capability cards — declared knowledge, one file per agent |
-| `skills/agent-router/references/` | Card schema, Jev decision layer, calibration |
+| `skills/helm/` | **Helm** — the distributable agent skill |
+| `skills/helm/SKILL.md` | Workflow and how to present a recommendation |
+| `skills/helm/scripts/probe.py` | Hardware + PATHEXT-aware agent discovery |
+| `skills/helm/scripts/route.py` | Routing question set, thresholds, fallback scorer |
+| `skills/helm/scripts/supervise.py` | Dispatch + Jev-judged completion |
+| `skills/helm/scripts/jev.py` | Shared Jev client |
+| `skills/helm/scripts/keystore.py` | Per-user API key storage |
+| `skills/helm/scripts/cards/` | Capability cards — declared knowledge, one file per agent |
+| `skills/helm/references/` | Card schema, Jev decision layer, calibration |
 | `tests/` | 124 tests; pure layers exhaustively, plus real dispatch |
 
 ## Docs
 
-- [`skills/agent-router/references/walkthrough.md`](skills/agent-router/references/walkthrough.md) — **start here**: install to end-to-end with real output
+- [`skills/helm/references/walkthrough.md`](skills/helm/references/walkthrough.md) — **start here**: install to end-to-end with real output
 - [`docs/idea.md`](docs/idea.md) — the thesis: the problem, the bet, why Jev is the right shape
 - [`docs/system-design.md`](docs/system-design.md) — the build spec: layers, questions, thresholds
 - [`docs/context.md`](docs/context.md) — research notes on what Jev is and is not
@@ -96,8 +96,8 @@ describing work they never did, and exit 0 after asking a question into a headle
 
 Working end to end, with one honest gap: **every threshold is uncalibrated.** They are conservative
 starting points, not fitted values, and they are labelled as such everywhere they appear. Decisions
-are logged to `~/.cache/agent-router/decisions.jsonl` from day one so they *can* be fitted —
-see [`references/calibration.md`](skills/agent-router/references/calibration.md).
+are logged to `~/.cache/helm/decisions.jsonl` from day one so they *can* be fitted —
+see [`references/calibration.md`](skills/helm/references/calibration.md).
 
 The Jev wire contract is **verified** against the live endpoint (2026-09-20, `jev-1.13.0`): Bearer
 auth, all three question types, and the `jev-1.13.0` pin, which the API validates rather than

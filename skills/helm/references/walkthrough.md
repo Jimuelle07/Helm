@@ -12,10 +12,10 @@ Total time: about five minutes. Total API cost: under a cent.
 
 ```bash
 # from skills.sh
-skills add agent-router
+skills add helm
 
 # or drop the folder into your skills directory
-git clone <repo> && cp -r skills/agent-router ~/.claude/skills/
+git clone <repo> && cp -r skills/helm ~/.claude/skills/
 ```
 
 There is nothing to build and nothing to `pip install`. The scripts use only the Python
@@ -25,7 +25,7 @@ standard library, so if `python3 --version` prints 3.10 or newer you are done. (
 Verify:
 
 ```bash
-cd ~/.claude/skills/agent-router
+cd ~/.claude/skills/helm
 python scripts/probe.py --repo .
 ```
 
@@ -99,7 +99,7 @@ person uses their own account):
 ```bash
 $ python scripts/route.py --set-api-key apikey_2272292763ff07842bf8e1...
 
-Stored TypeSafe API key (apike...bf32) at ~/.cache/agent-router/credentials.json
+Stored TypeSafe API key (apike...bf32) at ~/.cache/helm/credentials.json
 Jev is now available. Run probe.py to confirm.
 ```
 
@@ -224,7 +224,7 @@ FAILED -- codex (failed)
   confidence 0.65 | satisfied 0.04 | needs_human 0.89 | awaiting_input 0.41
   exit 0 after 31.4s | judged by jev
   next: retry
-  full transcript: /tmp/agent-router-runs/codex-1789882180-5804.log
+  full transcript: /tmp/helm-runs/codex-1789882180-5804.log
 ```
 
 **Exit code 0. Nothing happened.** From the transcript:
@@ -252,7 +252,7 @@ DONE -- codex (completed)
   confidence 1.0 | satisfied 0.98 | needs_human 0.05 | awaiting_input 0.07
   exit 0 after 69.4s | judged by jev
   next: accept
-  full transcript: /tmp/agent-router-runs/codex-1789882299-14628.log
+  full transcript: /tmp/helm-runs/codex-1789882299-14628.log
 ```
 
 ```diff
@@ -359,13 +359,13 @@ python scripts/supervise.py codex "task" --json
 
 # tests
 python -m unittest discover -s tests               # 145, offline, free
-AGENT_ROUTER_LIVE=1 python -m unittest tests.test_jev_live   # 18, live API
+HELM_LIVE=1 python -m unittest tests.test_jev_live   # 18, live API
 ```
 
-State lives in `~/.cache/agent-router/` — `credentials.json`, `registry.json` (the cache),
+State lives in `~/.cache/helm/` — `credentials.json`, `registry.json` (the cache),
 and `decisions.jsonl` (every routing decision, for calibrating thresholds later). Run logs
-go to your temp directory. Override any of it with `AGENT_ROUTER_CREDENTIALS`,
-`AGENT_ROUTER_CACHE`, `AGENT_ROUTER_TRACES`, `AGENT_ROUTER_RUNS`.
+go to your temp directory. Override any of it with `HELM_CREDENTIALS`,
+`HELM_CACHE`, `HELM_TRACES`, `HELM_RUNS`.
 
 ---
 

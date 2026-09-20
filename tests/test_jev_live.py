@@ -4,7 +4,7 @@ Skipped unless a key is configured, because most runs of this suite should not
 need the network and must not cost anyone money. Enable with a configured key
 plus:
 
-    AGENT_ROUTER_LIVE=1 python -m unittest tests.test_jev_live
+    HELM_LIVE=1 python -m unittest tests.test_jev_live
 
 These exist because the wire format was inferred for most of this project's
 life and the honest thing was to label it unverified. It is verified now, and
@@ -22,16 +22,16 @@ import sys
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "agent-router" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "helm" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import jev  # noqa: E402
 import route  # noqa: E402
 import supervise as S  # noqa: E402
 
-LIVE = os.environ.get("AGENT_ROUTER_LIVE") == "1" and jev.available()
+LIVE = os.environ.get("HELM_LIVE") == "1" and jev.available()
 skip_unless_live = unittest.skipUnless(
-    LIVE, "set AGENT_ROUTER_LIVE=1 and configure a key to run live API tests")
+    LIVE, "set HELM_LIVE=1 and configure a key to run live API tests")
 
 
 @skip_unless_live

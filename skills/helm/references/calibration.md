@@ -57,10 +57,10 @@ better than both, provided two conditions hold:
 2. Traces are recorded from day one, so they *can* be fitted later.
 
 Both hold. `route.py` writes one JSONL row per routing decision to
-`~/.cache/agent-router/decisions.jsonl` (override with `AGENT_ROUTER_TRACES`).
+`~/.cache/helm/decisions.jsonl` (override with `HELM_TRACES`).
 
 `supervise.py` does not yet write traces of its own -- completion verdicts are currently
-only observable in its output and in the per-run logs under `AGENT_ROUTER_RUNS`. Wiring the
+only observable in its output and in the per-run logs under `HELM_RUNS`. Wiring the
 same trace writer into it is the obvious next step before its thresholds can be fitted.
 
 ## What a trace row contains
@@ -140,12 +140,12 @@ nothing appearing to break.
 ```bash
 # How often does each mode fire?
 python -c "import json,collections,pathlib; \
-p=pathlib.Path.home()/'.cache/agent-router/decisions.jsonl'; \
+p=pathlib.Path.home()/'.cache/helm/decisions.jsonl'; \
 print(collections.Counter(json.loads(l)['route']['mode'] for l in p.open(encoding='utf-8')))"
 
 # Which agents get chosen, and by which brain?
 python -c "import json,collections,pathlib; \
-p=pathlib.Path.home()/'.cache/agent-router/decisions.jsonl'; \
+p=pathlib.Path.home()/'.cache/helm/decisions.jsonl'; \
 print(collections.Counter((json.loads(l)['source'], json.loads(l)['route']['agent']) for l in p.open(encoding='utf-8')))"
 ```
 

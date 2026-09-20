@@ -1,7 +1,11 @@
-# agent-router
+# Helm
 
-**Your coding agent can't see the other coding agents installed next to it.** This skill
-fixes that — and makes sure it never hands work to one that isn't logged in.
+*Steering and control over the coding agents already on your machine.*
+
+**Your coding agent can't see the other coding agents installed next to it.** Helm fixes
+that — and makes sure it never hands work to one that isn't logged in.
+
+> Not related to Helm the Kubernetes package manager. This one steers AI coding agents.
 
 If you have `claude`, `codex`, `cursor-agent`, `gemini`, `aider`, `opencode` and `copilot`
 on your machine, that's seven agents fronting four model families, and not one of them can
@@ -51,7 +55,7 @@ DONE -- codex (completed)
   Edited src/parser.py and ran the suite: 14 passed
   exit 0 after 47.2s | judged by jev
   next: accept
-  full transcript: /tmp/agent-router-runs/codex-1758.log
+  full transcript: /tmp/helm-runs/codex-1758.log
 ```
 
 This catches what an exit code can't. Agents exit 0 after describing work they never did
@@ -113,7 +117,7 @@ tool in isolation. See `references/capability-cards.md`.
 ## Honest limitations
 
 - **Every threshold is uncalibrated.** They're conservative starting points, labelled as
-  such everywhere they appear. Decisions log to `~/.cache/agent-router/decisions.jsonl`
+  such everywhere they appear. Decisions log to `~/.cache/helm/decisions.jsonl`
   from day one so they *can* be fitted later.
 - **The Jev wire contract is verified** (2026-09-20, `jev-1.13.0`) — Bearer auth, all three
   question types, and a pin the API actually validates. `probe.py --check-jev` confirms your

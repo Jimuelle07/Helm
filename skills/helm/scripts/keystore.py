@@ -24,8 +24,8 @@ import stat
 from pathlib import Path
 
 CREDENTIALS_PATH = Path(
-    os.environ.get("AGENT_ROUTER_CREDENTIALS")
-    or Path.home() / ".cache" / "agent-router" / "credentials.json"
+    os.environ.get("HELM_CREDENTIALS")
+    or Path.home() / ".cache" / "helm" / "credentials.json"
 )
 
 
@@ -111,7 +111,7 @@ def add_key_args(parser) -> None:
     """Shared --set-api-key / --clear-api-key flags for probe.py and route.py."""
     parser.add_argument(
         "--set-api-key", metavar="KEY",
-        help="store your TypeSafe API key locally (~/.cache/agent-router/credentials.json) and exit",
+        help="store your TypeSafe API key locally (~/.cache/helm/credentials.json) and exit",
     )
     parser.add_argument(
         "--clear-api-key", action="store_true",

@@ -1,5 +1,5 @@
 ---
-name: agent-router
+name: helm
 description: >
   Discovers which coding-agent CLIs are actually installed AND logged in on this machine
   (Claude Code, Codex, Cursor Agent, Gemini, Aider, OpenCode, Copilot, Ollama and others)
@@ -12,10 +12,14 @@ description: >
   to call its model, or wants a build orchestrated across several agents. Also use it before
   starting a substantial build when picking the wrong tool would be expensive — even if the
   user never names an agent — because a coding agent otherwise cannot see the sibling agents
-  installed right next to it.
+  installed right next to it. This skill is about steering AI coding agents; it has nothing
+  to do with Helm the Kubernetes package manager, so do not use it for charts, `helm install`,
+  Kubernetes releases, or cluster deployment.
 ---
 
-# Agent Router
+# Helm
+
+*Taking the helm of the agents already on your machine.*
 
 ## Why this exists
 
@@ -54,7 +58,7 @@ for their TypeSafe API key (from `docs.typesafe.ai` / their TypeSafe account) an
 python scripts/route.py --set-api-key apikey_...
 ```
 
-This stores the key locally at `~/.cache/agent-router/credentials.json` (owner-only
+This stores the key locally at `~/.cache/helm/credentials.json` (owner-only
 permissions on POSIX) and it is picked up on every future call — nothing else to
 configure. `--clear-api-key` removes it. Confirm it works with one live request:
 
@@ -140,7 +144,7 @@ DONE -- codex (completed)
   confidence 0.88 | satisfied 0.91 | needs_human 0.08 | awaiting_input 0.02
   exit 0 after 47.2s | judged by jev
   next: accept
-  full transcript: /tmp/agent-router-runs/codex-1758...log
+  full transcript: /tmp/helm-runs/codex-1758...log
 ```
 
 Act on `next`, and only open the transcript if it says `review` or you have a specific
@@ -241,7 +245,7 @@ keychains and browser sessions no probe can enumerate — so it never blocks. *T
 status command said it is logged out* is authoritative, and does block. Only the second is
 a reason to route elsewhere; mention the first as a caveat and move on.
 
-**Every decision is logged** to `~/.cache/agent-router/decisions.jsonl`, because the
+**Every decision is logged** to `~/.cache/helm/decisions.jsonl`, because the
 thresholds in `route.py` and `supervise.py` are honest guesses until there are real traces
 to fit them against. If the user disagrees with a routing call, that disagreement is the
 valuable signal — note it, and point them at `references/calibration.md`.

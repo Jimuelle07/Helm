@@ -42,8 +42,8 @@ import keystore  # noqa: E402
 
 CARDS_DIR = Path(__file__).parent / "cards"
 CACHE_PATH = Path(
-    os.environ.get("AGENT_ROUTER_CACHE")
-    or Path.home() / ".cache" / "agent-router" / "registry.json"
+    os.environ.get("HELM_CACHE")
+    or Path.home() / ".cache" / "helm" / "registry.json"
 )
 CACHE_TTL_SECONDS = 24 * 3600
 VERSION_TIMEOUT = 20
@@ -575,7 +575,7 @@ def build_registry(repo_root: Path | None = None, want_version: bool = True,
         a["routable"] = ok
         a["routable_reason"] = why
     return {
-        "schema": "agent-router/registry/1",
+        "schema": "helm/registry/1",
         "probed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "hardware": hardware,
         "local_inference": local,

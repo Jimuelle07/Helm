@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "agent-router" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "helm" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import probe  # noqa: E402

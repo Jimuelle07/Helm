@@ -15,14 +15,14 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "agent-router" / "scripts"
+SCRIPTS = Path(__file__).resolve().parents[1] / "skills" / "helm" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import keystore  # noqa: E402
 
 
 class KeystoreTestCase(unittest.TestCase):
-    """Points AGENT_ROUTER_CREDENTIALS at a throwaway file for every test, so
+    """Points HELM_CREDENTIALS at a throwaway file for every test, so
     a real key on the machine running these tests is never touched."""
 
     def setUp(self):

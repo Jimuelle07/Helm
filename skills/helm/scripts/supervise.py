@@ -52,8 +52,8 @@ import jev  # noqa: E402
 import probe  # noqa: E402
 
 RUN_DIR = Path(
-    os.environ.get("AGENT_ROUTER_RUNS")
-    or Path(tempfile.gettempdir()) / "agent-router-runs"
+    os.environ.get("HELM_RUNS")
+    or Path(tempfile.gettempdir()) / "helm-runs"
 )
 
 # Excerpt budget for what Jev sees. Jev allows 32k tokens for state plus the

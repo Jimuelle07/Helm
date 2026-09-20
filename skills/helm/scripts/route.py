@@ -37,8 +37,8 @@ import probe  # noqa: E402
 
 JEV_MODEL = jev.MODEL
 TRACE_PATH = Path(
-    os.environ.get("AGENT_ROUTER_TRACES")
-    or Path.home() / ".cache" / "agent-router" / "decisions.jsonl"
+    os.environ.get("HELM_TRACES")
+    or Path.home() / ".cache" / "helm" / "decisions.jsonl"
 )
 
 
