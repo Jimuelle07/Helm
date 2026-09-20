@@ -46,6 +46,11 @@ CACHE_PATH = Path(
     or Path.home() / ".cache" / "helm" / "registry.json"
 )
 CACHE_TTL_SECONDS = 24 * 3600
+
+# Bumped whenever the shape of a cached registry changes. A cache that does
+# not match is thrown away, so a card edit takes effect on the next call
+# instead of whenever the 24-hour TTL happens to lapse.
+REGISTRY_SCHEMA = "helm/registry/2"
 VERSION_TIMEOUT = 20
 IS_WINDOWS = os.name == "nt"
 
@@ -575,7 +580,7 @@ def build_registry(repo_root: Path | None = None, want_version: bool = True,
         a["routable"] = ok
         a["routable_reason"] = why
     return {
-        "schema": "helm/registry/1",
+        "schema": REGISTRY_SCHEMA,
         "probed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "hardware": hardware,
         "local_inference": local,
@@ -633,6 +638,13 @@ def load_cached(refresh: bool, repo_root: Path | None, want_version: bool,
             if raw:
                 try:
                     reg = json.loads(raw)
+                    # A cache written by an older schema is discarded rather
+                    # than reused. Cards now carry dispatch modes, so a stale
+                    # registry does not merely look out of date -- it silently
+                    # drops the flags a task was supposed to run with, which
+                    # is the failure mode this whole file exists to avoid.
+                    if reg.get("schema") != REGISTRY_SCHEMA:
+                        raise KeyError("registry schema changed")
                     reg["from_cache"] = True
                     reg["cache_age_seconds"] = int(age)
                     # Free RAM is a point-in-time reading, never a cached capability.

@@ -40,12 +40,62 @@
   "headless": {
     "argv": [
       "cursor-agent",
+      "{flags}",
       "-p",
       "{prompt}"
     ],
     "model_flag": "--model",
     "cwd_aware": true,
-    "write_enabled": true
+    "write_enabled": true,
+    "modes": {
+      "unattended": {
+        "args": [
+          "-f"
+        ],
+        "verified": false,
+        "note": "force/YOLO per the cheat sheet -- confirm against `cursor-agent --help`"
+      },
+      "sandbox": {
+        "args": [
+          "-w"
+        ],
+        "verified": false,
+        "note": "git worktree per the cheat sheet -- confirm against `cursor-agent --help`"
+      },
+      "plan": {
+        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
+        "verified": true
+      },
+      "parallel": {
+        "prompt_prefix": "Use your repository index to find every affected call site first, then apply the change across all of them in one pass rather than file by file. Task: ",
+        "verified": true
+      },
+      "readonly": {
+        "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
+        "verified": true,
+        "note": "advisory only -- cursor-agent's plan mode flag is unconfirmed, so this is an instruction, not a guarantee"
+      }
+    },
+    "recovery": {
+      "no_op": {
+        "prompt_prefix": "Your previous run described this work instead of doing it. Do not restate the plan -- make the edits on disk now, and finish by listing the files you changed. Task: ",
+        "modes": [
+          "unattended"
+        ],
+        "note": "re-dispatch with an explicit apply-the-edits instruction"
+      },
+      "stuck": {
+        "prompt_prefix": "You are running headless: nobody can answer a question, and asking one ends the run with nothing done. Make reasonable assumptions, complete the task, and record those assumptions in your final message. Task: ",
+        "modes": [
+          "unattended"
+        ],
+        "note": "re-dispatch telling the agent no answer can arrive"
+      },
+      "failed": {
+        "prompt_prefix": "A previous attempt at this task errored out. Inspect the working tree for half-applied changes, clean them up, then complete the task. Task: ",
+        "note": "re-dispatch after checking the tree for partial work"
+      }
+    }
   },
   "contract_verified": true,
   "auth_check": {

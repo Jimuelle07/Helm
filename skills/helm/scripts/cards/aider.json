@@ -44,13 +44,61 @@
   "headless": {
     "argv": [
       "aider",
+      "{flags}",
       "--message",
       "{prompt}",
       "--yes-always"
     ],
     "model_flag": "--model",
     "cwd_aware": true,
-    "write_enabled": true
+    "write_enabled": true,
+    "modes": {
+      "unattended": {
+        "satisfied_by_base": true,
+        "verified": true,
+        "note": "`--yes-always` in the base contract already answers every confirmation"
+      },
+      "plan": {
+        "args": [
+          "--architect"
+        ],
+        "verified": true,
+        "note": "architect edit format: reason out the change, then apply it (the flag form of the in-chat /architect command)"
+      },
+      "readonly": {
+        "args": [
+          "--dry-run"
+        ],
+        "verified": true,
+        "note": "runs the edit loop without writing anything to disk"
+      }
+    },
+    "recovery": {
+      "no_op": {
+        "prompt_prefix": "Your previous run described this work instead of doing it. Do not restate the plan -- make the edits on disk now, and finish by listing the files you changed. Task: ",
+        "modes": [
+          "unattended"
+        ],
+        "note": "re-dispatch with an explicit apply-the-edits instruction"
+      },
+      "stuck": {
+        "prompt_prefix": "You are running headless: nobody can answer a question, and asking one ends the run with nothing done. Make reasonable assumptions, complete the task, and record those assumptions in your final message. Task: ",
+        "modes": [
+          "unattended"
+        ],
+        "note": "re-dispatch telling the agent no answer can arrive"
+      },
+      "failed": {
+        "prompt_prefix": "A previous attempt failed and its commit has been rolled back with /undo. Start from the current tree state. Task: ",
+        "note": "aider auto-commits, so /undo rolls the failed attempt back before the retry starts",
+        "cleanup": [
+          "aider",
+          "--message",
+          "/undo",
+          "--yes-always"
+        ]
+      }
+    }
   },
   "contract_verified": true
 }

@@ -1,13 +1,82 @@
 {
   "name": "qwen",
   "display_name": "Qwen Code",
-  "bin_names": ["qwen"],
+  "bin_names": [
+    "qwen"
+  ],
   "competence": "Cost-sensitive coding work on open-weight Qwen models, including self-hosted endpoints",
-  "strengths": ["low cost", "can point at self-hosted inference", "generous free quota"],
-  "weaknesses": ["weaker on long-horizon agentic work than frontier models"],
-  "task_fit": {"scaffold": 3, "feature": 3, "bugfix": 3, "refactor": 2, "test": 3, "docs": 3, "review": 2, "research": 2, "ops": 2, "other": 3},
+  "strengths": [
+    "low cost",
+    "can point at self-hosted inference",
+    "generous free quota"
+  ],
+  "weaknesses": [
+    "weaker on long-horizon agentic work than frontier models"
+  ],
+  "task_fit": {
+    "scaffold": 3,
+    "feature": 3,
+    "bugfix": 3,
+    "refactor": 2,
+    "test": 3,
+    "docs": 3,
+    "review": 2,
+    "research": 2,
+    "ops": 2,
+    "other": 3
+  },
   "context_class": "large",
-  "auth": {"modes": ["oauth", "api_key"], "env": ["DASHSCOPE_API_KEY", "OPENAI_API_KEY"], "config": ["~/.qwen"]},
-  "headless": {"argv": ["qwen", "-p", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "auth": {
+    "modes": [
+      "oauth",
+      "api_key"
+    ],
+    "env": [
+      "DASHSCOPE_API_KEY",
+      "OPENAI_API_KEY"
+    ],
+    "config": [
+      "~/.qwen"
+    ]
+  },
+  "headless": {
+    "argv": [
+      "qwen",
+      "{flags}",
+      "-p",
+      "{prompt}"
+    ],
+    "model_flag": "--model",
+    "cwd_aware": true,
+    "modes": {
+      "plan": {
+        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
+        "verified": true
+      },
+      "parallel": {
+        "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
+        "verified": true
+      },
+      "readonly": {
+        "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
+        "verified": true,
+        "note": "advisory only -- no read-only flag confirmed"
+      }
+    },
+    "recovery": {
+      "no_op": {
+        "prompt_prefix": "Your previous run described this work instead of doing it. Do not restate the plan -- make the edits on disk now, and finish by listing the files you changed. Task: ",
+        "note": "re-dispatch with an explicit apply-the-edits instruction; qwen declares no unattended mode to force, so this is prompt-level only"
+      },
+      "stuck": {
+        "prompt_prefix": "You are running headless: nobody can answer a question, and asking one ends the run with nothing done. Make reasonable assumptions, complete the task, and record those assumptions in your final message. Task: ",
+        "note": "re-dispatch telling the agent no answer can arrive"
+      },
+      "failed": {
+        "prompt_prefix": "A previous attempt at this task errored out. Inspect the working tree for half-applied changes, clean them up, then complete the task. Task: ",
+        "note": "re-dispatch after checking the tree for partial work"
+      }
+    }
+  },
   "contract_verified": false
 }

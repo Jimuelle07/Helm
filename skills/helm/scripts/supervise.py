@@ -48,6 +48,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import dispatch  # noqa: E402
 import jev  # noqa: E402
 import probe  # noqa: E402
 
@@ -144,14 +145,36 @@ THRESHOLDS = {
     "STUCK_POLLS_BEFORE_KILL": 3,    # consecutive no-progress polls before aborting
 }
 
+# One recovery attempt by default. The cure for a `no_op` is cheap and usually
+# works first time; a budget larger than one mostly buys you the same failure
+# twice at double the price, and the outcomes that survive a retry are exactly
+# the ones a human should see.
+DEFAULT_MAX_RETRIES = 1
+
+# A recovery cleanup (aider's `/undo`, say) exists to put the tree back, not to
+# do work. It gets its own short leash so a hung cleanup cannot eat the budget
+# the actual retry needs.
+CLEANUP_TIMEOUT = 120.0
+
 
 # =========================================================================== #
 # Dispatch
+#
+# What gets run is no longer just the card's argv: dispatch.py translates Jev's
+# metrics into this agent's own flags and prompt keywords first. The
+# translation lives there so it stays a pure function; this module only spawns
+# what it is handed.
 # =========================================================================== #
 
-def render_command(card: dict, prompt: str) -> list[str]:
-    argv = list((card.get("headless") or {}).get("argv") or [])
-    return [prompt if tok == "{prompt}" else tok for tok in argv]
+def render_command(card: dict, prompt: str, signals: dict | None = None) -> list[str]:
+    """The argv this task would actually be launched with.
+
+    Kept as a thin wrapper rather than inlined at the call site because
+    route.py prints this command for the user to run by hand. If the printed
+    command and the spawned command can drift apart, "run it yourself to
+    override" quietly stops meaning what it says.
+    """
+    return dispatch.plan(card, prompt, signals).argv
 
 
 def unsafe_on_windows(resolved: str | None, args: list[str]) -> bool:
@@ -444,7 +467,17 @@ def _headline(output: str) -> str:
 # =========================================================================== #
 
 def supervise(agent_name: str, task: str, cwd: Path, timeout: float,
-              watch: bool, poll_interval: float, registry: dict) -> dict:
+              watch: bool, poll_interval: float, registry: dict,
+              signals: dict | None = None,
+              max_retries: int = DEFAULT_MAX_RETRIES,
+              use_modes: bool = True) -> dict:
+    """Dispatch, judge, and -- when the card knows the cure -- try again.
+
+    `signals` is Jev's routing verdict. Passing it is what turns a generic
+    invocation into an agent-native one; omitting it reproduces the old
+    behaviour exactly, which is deliberate. Nothing here should widen an
+    agent's permissions on the strength of a metric nobody supplied.
+    """
     agents = {a["name"]: a for a in registry["agents"]}
     card = agents.get(agent_name)
     if not card:
@@ -458,9 +491,79 @@ def supervise(agent_name: str, task: str, cwd: Path, timeout: float,
     if not card.get("headless"):
         return _error(agent_name, f"{agent_name} has no headless invocation contract")
 
-    argv = render_command(card, task)
-    if not argv:
+    plan = (dispatch.plan(card, task, signals) if use_modes
+            else dispatch.base_plan(card, task))
+    if not plan.argv:
         return _error(agent_name, "no invocation contract to render")
+
+    # One budget for the whole supervision, retries included. Giving each
+    # attempt a fresh `timeout` would let a two-attempt run quietly take twice
+    # as long as the caller asked for.
+    deadline = time.time() + timeout
+    attempts: list[dict] = []
+    recovered_from: list[str] = []
+    verdict: dict = {}
+
+    for attempt in range(max_retries + 1):
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            break
+
+        verdict = _dispatch_once(card, agent_name, task, plan, cwd,
+                                 remaining, watch, poll_interval)
+        attempts.append({
+            "attempt": attempt + 1,
+            "outcome": verdict["outcome"],
+            "modes": list(plan.modes),
+            "log": verdict.get("log"),
+        })
+        if verdict["outcome"] == "error":
+            break
+
+        rec = dispatch.recovery_for(card, verdict["outcome"])
+        go, why = dispatch.should_recover(verdict, rec, attempt, max_retries)
+        if not go:
+            if rec is not None and attempt < max_retries:
+                verdict["notes"].append(f"not retrying: {why}")
+            break
+
+        cleanup_note = _run_cleanup(card, rec, cwd, deadline)
+        if cleanup_note:
+            recovered_from.append(cleanup_note)
+        recovered_from.append(f"{verdict['outcome']}: {why}")
+        plan = dispatch.apply_recovery(card, task, rec, signals)
+
+    if not attempts:
+        return _error(agent_name, "timeout budget was exhausted before dispatch")
+
+    verdict["attempts"] = attempts
+    verdict["dispatch"] = {
+        "modes": list(plan.modes),
+        "unavailable": list(plan.unmet),
+        "unverified": list(plan.unverified),
+        "argv": plan.argv[:1] + ["..."] if plan.argv else [],
+    }
+    for n in plan.notes:
+        verdict["notes"].append(f"dispatch: {n}")
+    if plan.unverified:
+        verdict["notes"].append(
+            "dispatch: applied unverified flags for "
+            + ", ".join(plan.unverified)
+            + " -- confirm them against the CLI's --help")
+    for r in recovered_from:
+        verdict["notes"].append(f"recovery: {r}")
+    if len(attempts) > 1:
+        verdict["notes"].append(
+            f"recovered and retried {len(attempts) - 1} time(s); "
+            f"outcomes: {' -> '.join(a['outcome'] for a in attempts)}")
+    return verdict
+
+
+def _dispatch_once(card: dict, agent_name: str, task: str,
+                   plan: "dispatch.Plan", cwd: Path, timeout: float,
+                   watch: bool, poll_interval: float) -> dict:
+    """Spawn one attempt and judge it. The loop above owns everything else."""
+    argv = list(plan.argv)
     if card.get("path"):
         argv[0] = card["path"]
     if unsafe_on_windows(card.get("path"), argv[1:]):
@@ -470,20 +573,51 @@ def supervise(agent_name: str, task: str, cwd: Path, timeout: float,
                       "through cmd.exe. Run the command yourself, or rephrase the task.")
 
     RUN_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = RUN_DIR / f"{agent_name}-{int(time.time())}-{os.getpid()}.log"
+    # Millisecond precision, because a recovery retry can start in the same
+    # second the first attempt ended -- and two attempts sharing a log file
+    # would overwrite the very transcript the retry was meant to explain.
+    log_path = RUN_DIR / f"{agent_name}-{int(time.time() * 1000)}-{os.getpid()}.log"
     run = Run(argv, cwd, log_path)
     run.start()
 
-    timed_out = False
     if watch:
-        rc, timed_out = _watch_loop(run, task, agent_name, timeout, poll_interval)
+        rc, timed_out = _watch_loop(run, plan.prompt, agent_name, timeout, poll_interval)
     else:
         rc = run.wait(timeout)
         timed_out = rc is None
 
     output = run.text()
-    verdict = judge(task, agent_name, output, rc, run.elapsed(), timed_out)
-    return compose(verdict, rc, run.elapsed(), timed_out, agent_name, log_path, output)
+    # Judged against the *original* task, not the prompt we decorated it with.
+    # The recovery prefix is an instruction to the worker, and feeding it to
+    # the judge as well would have Jev grading the agent on our scaffolding
+    # rather than on what the user actually asked for.
+    j = judge(task, agent_name, output, rc, run.elapsed(), timed_out)
+    return compose(j, rc, run.elapsed(), timed_out, agent_name, log_path, output)
+
+
+def _run_cleanup(card: dict, rec: "dispatch.Recovery", cwd: Path,
+                 deadline: float) -> str | None:
+    """Run a card's declared cleanup (aider's `/undo`) before the retry.
+
+    These argv are card-authored constants with no task text in them, so the
+    injection concern that governs `{prompt}` does not apply -- but they do
+    touch the repository, which is why only an explicitly declared `cleanup`
+    ever runs, and only for an outcome the card named.
+    """
+    if not rec.cleanup:
+        return None
+    argv = list(rec.cleanup)
+    if card.get("path"):
+        argv[0] = card["path"]
+    budget = min(CLEANUP_TIMEOUT, max(0.0, deadline - time.time()))
+    if budget <= 0:
+        return "skipped cleanup: no time left in the budget"
+    try:
+        subprocess.run(argv, cwd=str(cwd), shell=False, timeout=budget,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"ran cleanup {' '.join(rec.cleanup)}"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"cleanup {' '.join(rec.cleanup)} failed ({type(exc).__name__})"
 
 
 def _watch_loop(run: Run, task: str, agent_name: str, timeout: float,
@@ -565,6 +699,14 @@ def render(v: dict) -> str:
     lines = [f"{v['outcome'].upper()} -- {v['agent']} ({v['status']})"]
     if v.get("headline"):
         lines.append(f"  {v['headline']}")
+    d = v.get("dispatch") or {}
+    if d.get("modes") or d.get("unavailable"):
+        bits = []
+        if d.get("modes"):
+            bits.append("modes " + ", ".join(d["modes"]))
+        if d.get("unavailable"):
+            bits.append("unavailable " + ", ".join(d["unavailable"]))
+        lines.append("  " + " | ".join(bits))
     if v.get("signals"):
         s = v["signals"]
         lines.append(
@@ -579,6 +721,43 @@ def render(v: dict) -> str:
     return "\n".join(lines)
 
 
+def _load_signals(inline: str | None, path: str | None) -> dict | None:
+    """Read the routing verdict from --signals or --signals-file.
+
+    A file is offered because the JSON is usually piped straight out of
+    `route.py --json`, and round-tripping that through a shell argument is how
+    a quote gets eaten and the metrics silently arrive empty -- which would
+    look exactly like "no modes needed".
+    """
+    if path:
+        raw = Path(path).read_text(encoding="utf-8")
+    elif inline:
+        raw = inline
+    else:
+        return None
+    got = json.loads(raw)
+    if not isinstance(got, dict):
+        raise ValueError("expected a JSON object")
+
+    # Three shapes turn up, and all three are accepted so no caller has to
+    # reshape anything: `route.py --json` in full, something carrying a
+    # `signals` block, or a raw Jev verdict. Flat keys always win over
+    # anything nested under `answers`, which Signals.from_dict unpacks.
+    merged: dict = {}
+    if isinstance(got.get("verdict"), dict):
+        merged.update(got["verdict"])
+
+    inner = got.get("route") if isinstance(got.get("route"), dict) else got
+    if isinstance(inner.get("signals"), dict):
+        merged.update(inner["signals"])
+        if inner.get("task_kind"):
+            merged["task_kind"] = inner["task_kind"]
+        return merged
+
+    # No envelope to unwrap: it is already the metrics themselves.
+    return merged or got
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Dispatch a task to an agent and let Jev judge completion.",
@@ -591,13 +770,32 @@ def main() -> int:
                     help="poll while running and stop early if stuck or waiting for input")
     ap.add_argument("--poll-interval", type=float, default=30.0,
                     help="seconds between polls when --watch (default: 30)")
+    ap.add_argument("--signals", metavar="JSON",
+                    help="Jev's routing verdict, as JSON -- either route.py's "
+                         "`signals` block or a raw verdict. Drives which "
+                         "agent-native flags and keywords get injected.")
+    ap.add_argument("--signals-file", metavar="PATH",
+                    help="read --signals from a file instead (avoids shell quoting)")
+    ap.add_argument("--no-modes", action="store_true",
+                    help="dispatch with the card's base contract only, injecting nothing")
+    ap.add_argument("--retry", type=int, default=DEFAULT_MAX_RETRIES,
+                    metavar="N",
+                    help=f"recovery attempts after a no_op/stuck/failed verdict "
+                         f"(default: {DEFAULT_MAX_RETRIES}; 0 disables)")
     ap.add_argument("--json", action="store_true", help="emit the verdict as JSON")
     args = ap.parse_args()
+
+    try:
+        signals = _load_signals(args.signals, args.signals_file)
+    except (OSError, ValueError) as exc:
+        ap.error(f"could not read --signals: {exc}")
 
     cwd = Path(args.repo).resolve()
     registry = probe.load_cached(False, None, want_version=True)
     verdict = supervise(args.agent, args.task, cwd, args.timeout,
-                        args.watch, args.poll_interval, registry)
+                        args.watch, args.poll_interval, registry,
+                        signals=signals, max_retries=max(0, args.retry),
+                        use_modes=not args.no_modes)
 
     if args.json:
         json.dump(verdict, sys.stdout, indent=2)

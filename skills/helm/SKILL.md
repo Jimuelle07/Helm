@@ -116,6 +116,31 @@ declines to auto-execute — precisely which gate stopped it.
 Useful flags: `--repo PATH` for repository context, `--json` for the full verdict,
 `--execute` to actually run the agent.
 
+**The printed command is tuned to the task, not generic.** Jev's metrics are translated
+into that agent's own flags and keywords before the command is shown:
+
+```
+RECOMMEND -> Cursor Agent (cursor-agent)
+  command:
+    cursor-agent -w -p refactor the payment client to use the new retry helper ...
+  modes injected: sandbox
+```
+
+`blast_radius` came back at 2.5, so the change runs in a git worktree rather than the live
+tree. A `review` task gets `gemini --approval-mode plan` and literally cannot write; a
+`scaffold` task gets an architecture-first preamble; a wide `refactor` gets told to fan out
+across sub-agents. The four rules and their thresholds are in
+`references/dispatch-modes.md`.
+
+Two things to tell the user when they come up:
+
+- `modes this agent cannot express: sandbox` means the chosen CLI has no way to do what the
+  metrics asked for. It is not an error, but it is worth saying out loud on a high-blast
+  task — offer a worktree, or a different agent.
+- `caveat: injected flags for X are unverified` means that flag came from a cheat sheet
+  rather than from the CLI's own `--help`. Seven of the thirteen cards were written on a
+  machine where those tools were not installed.
+
 ### 3. Hand off, and let Jev tell you when it is done
 
 Default behaviour is to recommend, not to run. Prefer showing the user the command and
@@ -128,6 +153,19 @@ When you do dispatch, go through the supervisor rather than running the agent yo
 python scripts/supervise.py codex "fix the failing test in src/parser.py"
 python scripts/supervise.py claude "..." --watch --timeout 900
 ```
+
+To get the same task-tuned flags when driving the supervisor directly, hand it the routing
+decision:
+
+```bash
+python scripts/route.py "..." --json > /tmp/decision.json
+python scripts/supervise.py claude "..." --signals-file /tmp/decision.json
+```
+
+`--execute` on `route.py` does this for you. Without signals the supervisor dispatches the
+card's plain base contract — which is the old behaviour, deliberately: nothing here widens
+an agent's permissions on the strength of a metric nobody supplied. `--no-modes` forces
+that base contract even when signals are present.
 
 **Do not read the worker's transcript to decide whether it finished.** That is the single
 most expensive thing you can do here: agent transcripts run to tens of thousands of tokens,
@@ -187,6 +225,29 @@ For a dispatched run, `supervise.py` returns `outcome` and `next`:
 Agents exit 0 after announcing what they *would* do, and exit 0 after asking a question
 into the void. If you were checking `rc == 0`, both would read as success.
 
+### Recovery
+
+`no_op`, `stuck` and `failed` are diagnoses, not dead ends, and most agents ship the cure.
+The supervisor retries once by default, injecting that agent's own recovery move — Aider's
+`/undo` before a retry, an explicit "you are headless, nobody can answer you" preamble for
+a stuck run, an apply-the-edits-now instruction for a no-op. The verdict then carries an
+`attempts` list:
+
+```
+DONE -- claude (completed)
+  note: recovery: no_op: re-dispatch with an explicit apply-the-edits instruction
+  note: recovered and retried 1 time(s); outcomes: no_op -> done
+```
+
+`--retry 0` disables it; `--retry 2` allows two. All attempts share the one `--timeout`
+budget, so a retry never doubles the wall clock you asked for.
+
+Two cases deliberately never retry. A `timeout` may have left the tree half-modified, and
+re-dispatching onto unknown partial state turns one bad run into two. And a verdict from
+the **heuristic fallback** never triggers a retry at all — the fallback cannot tell a terse
+success from a no-op, so acting on it would risk re-running work that already succeeded.
+You will see `not retrying: verdict came from the fallback judge` when that happens.
+
 ## When Jev is unavailable
 
 If no API key is configured (see setup above) or the API is unreachable, `route.py` falls
@@ -233,6 +294,8 @@ Load these only when the task calls for them:
 - `references/walkthrough.md` — full install-to-end-to-end example with real output; read this
   first if you are unsure how the pieces fit together
 - `references/capability-cards.md` — card schema, writing good competence lines, adding an agent
+- `references/dispatch-modes.md` — how a Jev metric becomes a CLI flag: the five modes, the
+  four rules, the recovery table, and which flags are verified
 - `references/jev-decision-layer.md` — the question set, why each question exists, Jev API details
 - `references/calibration.md` — the thresholds, why they are currently guesses, and how to fit them
   against recorded traces

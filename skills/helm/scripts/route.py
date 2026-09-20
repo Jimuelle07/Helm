@@ -31,6 +31,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import dispatch  # noqa: E402
 import jev  # noqa: E402
 import keystore  # noqa: E402
 import probe  # noqa: E402
@@ -340,6 +341,7 @@ def compose(verdict: dict, routable: list[dict], intent: str) -> dict:
     if source == "fallback":
         confidence = min(confidence, THRESHOLDS["FALLBACK_CONFIDENCE_CAP"])
 
+    task_kind = (ans.get("task_kind") or {}).get("choice")
     blast = num("blast_radius", "score", 1.5)
     clarity = num("spec_clarity", "score", 1.5)
     breadth = num("context_breadth", "score", 1.5)
@@ -360,7 +362,8 @@ def compose(verdict: dict, routable: list[dict], intent: str) -> dict:
             "agent": None,
             "reason": "No installed agent is a good fit for this task.",
             "gates": gates or ["no suitable agent"],
-            "signals": _signals(blast, clarity, breadth, needs_human, reversible, confidence),
+            "signals": _signals(blast, clarity, breadth, needs_human,
+                                reversible, confidence, task_kind),
             "source": source,
         }
 
@@ -384,23 +387,54 @@ def compose(verdict: dict, routable: list[dict], intent: str) -> dict:
     if not card.get("auth", {}).get("ready"):
         caveats.append("no credentials detected (the agent may still be logged in)")
 
+    signals = _signals(blast, clarity, breadth, needs_human, reversible,
+                       confidence, task_kind)
+
+    # Plan the invocation here rather than at execute time so the command the
+    # user is shown, the command `--execute` runs, and the caveats about both
+    # all come from one call.
+    plan = dispatch.plan(card, intent, signals)
+    if plan.unmet:
+        caveats.append(
+            f"{agent_name} cannot express {', '.join(plan.unmet)} -- "
+            "see the dispatch notes")
+    if plan.unverified:
+        caveats.append(
+            f"injected flags for {', '.join(plan.unverified)} are unverified "
+            "against this CLI's --help")
+
     clarify = clarity <= THRESHOLDS["CLARIFY_MAX_SPEC_CLARITY"]
     return {
         "mode": "clarify" if clarify else ("auto" if not gates else "recommend"),
         "agent": agent_name,
         "display_name": card.get("display_name", agent_name),
-        "command": render_command(card, intent),
+        "command": plan.argv,
         "reason": card.get("competence", ""),
         "gates": gates,
         "caveats": caveats,
-        "signals": _signals(blast, clarity, breadth, needs_human, reversible, confidence),
+        "signals": signals,
+        "dispatch": {
+            "modes": list(plan.modes),
+            "unavailable": list(plan.unmet),
+            "unverified": list(plan.unverified),
+            "notes": list(plan.notes),
+        },
         "alternatives": _alternatives(ans, agent_name, by_name),
         "source": source,
     }
 
 
-def _signals(blast, clarity, breadth, needs_human, reversible, confidence) -> dict:
+def _signals(blast, clarity, breadth, needs_human, reversible, confidence,
+             task_kind=None) -> dict:
+    """The metrics downstream actually acts on.
+
+    `task_kind` rides along with the numbers because dispatch.py keys two of
+    its four rules off it. Keeping it out of this block would mean every
+    caller had to reach back into the raw verdict to reconstruct what the
+    route already knew.
+    """
     return {
+        "task_kind": task_kind,
         "confidence": round(confidence, 3),
         "blast_radius": round(blast, 2),
         "spec_clarity": round(clarity, 2),
@@ -423,10 +457,16 @@ def _alternatives(ans: dict, chosen: str, by_name: dict) -> list[dict]:
     return out
 
 
-def render_command(card: dict, intent: str) -> list[str]:
-    headless = card.get("headless") or {}
-    argv = list(headless.get("argv") or [])
-    return [intent if tok == "{prompt}" else tok for tok in argv]
+def render_command(card: dict, intent: str, signals: dict | None = None) -> list[str]:
+    """The command we would run -- including whatever Jev's metrics call for.
+
+    This is the command printed for the user, and `--execute` runs the same
+    planner over the same card, so the two cannot drift. That matters more
+    than it looks: the standing advice when a gate blocks auto-execution is
+    "run the printed command yourself", which is only safe advice while the
+    printed command is the real one, sandbox flags and all.
+    """
+    return dispatch.plan(card, intent, signals).argv
 
 
 # =========================================================================== #
@@ -448,6 +488,8 @@ def execute(route: dict, card: dict, cwd: Path, timeout: float = 900.0,
         agent_name=route["agent"], task=route["_intent"], cwd=cwd,
         timeout=timeout, watch=watch, poll_interval=30.0,
         registry={"agents": [card], "local_inference": {"available": False, "vram_gb": None}},
+        # The same signals that chose the agent also choose how to launch it.
+        signals=route.get("signals"),
     )
     print("", file=sys.stderr)
     print(supervise.render(verdict), file=sys.stderr)
@@ -535,12 +577,23 @@ def render(route: dict, intent: str) -> str:
         out.append("  command:")
         out.append(f"    {' '.join(route['command'])}")
 
+    d = route.get("dispatch") or {}
+    if d.get("modes") or d.get("unavailable"):
+        out.append("")
+        if d.get("modes"):
+            out.append(f"  modes injected: {', '.join(d['modes'])}")
+        if d.get("unavailable"):
+            out.append(f"  modes this agent cannot express: {', '.join(d['unavailable'])}")
+        for n in d.get("notes") or []:
+            out.append(f"    - {n}")
+
     sig = route["signals"]
     out.append("")
     out.append(
-        f"  signals: confidence {sig['confidence']} | blast {sig['blast_radius']} | "
-        f"clarity {sig['spec_clarity']} | breadth {sig['context_breadth']} | "
-        f"needs_human {sig['needs_human']} | reversible {sig['reversible']}"
+        f"  signals: kind {sig.get('task_kind')} | confidence {sig['confidence']} | "
+        f"blast {sig['blast_radius']} | clarity {sig['spec_clarity']} | "
+        f"breadth {sig['context_breadth']} | needs_human {sig['needs_human']} | "
+        f"reversible {sig['reversible']}"
     )
     out.append(f"  judged by: {route['source']}")
 

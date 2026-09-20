@@ -1,15 +1,60 @@
 {
   "name": "ollama",
   "display_name": "Ollama (local models)",
-  "bin_names": ["ollama"],
+  "bin_names": [
+    "ollama"
+  ],
   "competence": "Fully local, offline, zero-marginal-cost generation for small well-specified tasks; only viable when models are downloaded and VRAM is sufficient",
-  "strengths": ["no network or API key needed", "no per-token cost", "data never leaves the machine"],
-  "weaknesses": ["much weaker than frontier models on multi-step work", "bounded by local VRAM", "not an agentic CLI on its own - no file editing or tool use"],
-  "task_fit": {"scaffold": 1, "feature": 1, "bugfix": 2, "refactor": 1, "test": 2, "docs": 3, "review": 2, "research": 1, "ops": 1, "other": 2},
+  "strengths": [
+    "no network or API key needed",
+    "no per-token cost",
+    "data never leaves the machine"
+  ],
+  "weaknesses": [
+    "much weaker than frontier models on multi-step work",
+    "bounded by local VRAM",
+    "not an agentic CLI on its own - no file editing or tool use"
+  ],
+  "task_fit": {
+    "scaffold": 1,
+    "feature": 1,
+    "bugfix": 2,
+    "refactor": 1,
+    "test": 2,
+    "docs": 3,
+    "review": 2,
+    "research": 1,
+    "ops": 1,
+    "other": 2
+  },
   "context_class": "small",
-  "requires": {"local_inference": true, "min_vram_gb": 6.0},
-  "auth": {"modes": ["none"], "env": [], "config": ["~/.ollama"]},
-  "headless": {"argv": ["ollama", "run", "{model}", "{prompt}"], "model_flag": null, "cwd_aware": false},
-  "list_models": ["ollama", "list"],
+  "requires": {
+    "local_inference": true,
+    "min_vram_gb": 6.0
+  },
+  "auth": {
+    "modes": [
+      "none"
+    ],
+    "env": [],
+    "config": [
+      "~/.ollama"
+    ]
+  },
+  "headless": {
+    "argv": [
+      "ollama",
+      "run",
+      "{flags}",
+      "{model}",
+      "{prompt}"
+    ],
+    "model_flag": null,
+    "cwd_aware": false
+  },
+  "list_models": [
+    "ollama",
+    "list"
+  ],
   "contract_verified": false
 }

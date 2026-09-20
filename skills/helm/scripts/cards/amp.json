@@ -1,13 +1,91 @@
 {
   "name": "amp",
   "display_name": "Amp",
-  "bin_names": ["amp"],
+  "bin_names": [
+    "amp"
+  ],
   "competence": "Autonomous multi-step coding runs where the agent is expected to keep going for a long stretch without check-ins",
-  "strengths": ["long autonomous runs", "parallel subagents", "strong on large tasks"],
-  "weaknesses": ["less controllable mid-run", "can be costly on open-ended briefs"],
-  "task_fit": {"scaffold": 4, "feature": 5, "bugfix": 4, "refactor": 4, "test": 4, "docs": 3, "review": 3, "research": 3, "ops": 2, "other": 3},
+  "strengths": [
+    "long autonomous runs",
+    "parallel subagents",
+    "strong on large tasks"
+  ],
+  "weaknesses": [
+    "less controllable mid-run",
+    "can be costly on open-ended briefs"
+  ],
+  "task_fit": {
+    "scaffold": 4,
+    "feature": 5,
+    "bugfix": 4,
+    "refactor": 4,
+    "test": 4,
+    "docs": 3,
+    "review": 3,
+    "research": 3,
+    "ops": 2,
+    "other": 3
+  },
   "context_class": "xlarge",
-  "auth": {"modes": ["api_key", "subscription"], "env": ["AMP_API_KEY"], "config": []},
-  "headless": {"argv": ["amp", "-x", "{prompt}"], "model_flag": null, "cwd_aware": true},
+  "auth": {
+    "modes": [
+      "api_key",
+      "subscription"
+    ],
+    "env": [
+      "AMP_API_KEY"
+    ],
+    "config": []
+  },
+  "headless": {
+    "argv": [
+      "amp",
+      "{flags}",
+      "-x",
+      "{prompt}"
+    ],
+    "model_flag": null,
+    "cwd_aware": true,
+    "modes": {
+      "unattended": {
+        "satisfied_by_base": true,
+        "verified": false,
+        "note": "`amp {flags}` is non-interactive; no separate approval flag confirmed"
+      },
+      "plan": {
+        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
+        "verified": true
+      },
+      "parallel": {
+        "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
+        "verified": true
+      },
+      "readonly": {
+        "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
+        "verified": true,
+        "note": "advisory only -- no read-only flag confirmed"
+      }
+    },
+    "recovery": {
+      "no_op": {
+        "prompt_prefix": "Your previous run described this work instead of doing it. Do not restate the plan -- make the edits on disk now, and finish by listing the files you changed. Task: ",
+        "modes": [
+          "unattended"
+        ],
+        "note": "re-dispatch with an explicit apply-the-edits instruction"
+      },
+      "stuck": {
+        "prompt_prefix": "You are running headless: nobody can answer a question, and asking one ends the run with nothing done. Make reasonable assumptions, complete the task, and record those assumptions in your final message. Task: ",
+        "modes": [
+          "unattended"
+        ],
+        "note": "re-dispatch telling the agent no answer can arrive"
+      },
+      "failed": {
+        "prompt_prefix": "A previous attempt at this task errored out. Inspect the working tree for half-applied changes, clean them up, then complete the task. Task: ",
+        "note": "re-dispatch after checking the tree for partial work"
+      }
+    }
+  },
   "contract_verified": false
 }

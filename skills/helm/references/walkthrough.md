@@ -298,7 +298,97 @@ burning the full timeout before anyone notices.
 
 ---
 
-## 6. Teaching it a tool it doesn't know
+## 6. The same task, launched three different ways
+
+Routing picks *who*. The dispatch layer picks *how* — translating Jev's metrics into that
+agent's own flags before the command is ever printed. Three real runs:
+
+```bash
+$ python scripts/route.py "refactor the payment client to use the new retry helper     across every call site in the repo"
+```
+
+```
+RECOMMEND -> Cursor Agent (cursor-agent)
+  command:
+    cursor-agent -w -p refactor the payment client to use the new retry helper ...
+
+  modes injected: sandbox
+
+  signals: kind refactor | confidence 0.85 | blast 2.5 | clarity 1.25 |
+           breadth 2.47 | needs_human 0.73 | reversible 0.54
+  caveat: injected flags for sandbox are unverified against this CLI's --help
+```
+
+`blast 2.5` crossed the 2.0 line, so the change runs in a git worktree instead of the live
+tree. The caveat is the honest half: `cursor-agent` was not installed on the machine where
+these cards were written, so `-w` came from the cheat sheet rather than from `--help`.
+
+```bash
+$ python scripts/route.py "review src/parser.py for off-by-one errors and report what you find"
+```
+
+```
+RECOMMEND -> Gemini CLI (gemini)
+  command:
+    gemini --approval-mode plan -p review src/parser.py for off-by-one errors ...
+
+  modes injected: readonly
+  signals: kind review | confidence 0.55 | blast 1.36 | clarity 2.24 | breadth 0.08 ...
+```
+
+The base contract is `--approval-mode auto_edit`. Because the task kind is `review`, that
+flag was *replaced* rather than extended: the agent now literally cannot write. An agent
+that helpfully applies its own review suggestion has not done the task — it has done a
+different, unrequested one.
+
+```bash
+$ python scripts/route.py "create a new FastAPI service from scratch with health checks,     structured logging and a Dockerfile"
+```
+
+```
+RECOMMEND -> Claude Code (claude)
+  command:
+    claude -p --permission-mode acceptEdits -w Before writing any code, work out the
+    structure: which files to create, what each is responsible for, and the interfaces
+    between them. State that plan, then implement it. Task: create a new FastAPI ...
+
+  modes injected: sandbox, plan
+  signals: kind scaffold | confidence 0.99 | blast 2.77 | clarity 1.55 | breadth 1.25 ...
+```
+
+Two rules fired at once: `sandbox` from the blast radius, and `plan` from the task kind.
+The prompt is decorated, the task text stays a single argv element, and the whole thing is
+reproducible — modes apply in a fixed order, so the same signals always render the same
+command.
+
+### What happens with no signals
+
+Nothing. `python scripts/supervise.py codex "..."` with no `--signals` renders the card's
+base contract byte for byte, and a test asserts that for every shipped card. The
+alternative is a system that quietly starts running `--yolo` the day an orchestrator
+forgets to pass a metric.
+
+### Recovery
+
+When Jev returns `no_op`, `stuck` or `failed` and the card declares a cure, the supervisor
+injects it and tries once more:
+
+```
+DONE -- claude (completed)
+  note: recovery: no_op: re-dispatch with an explicit apply-the-edits instruction
+  note: recovered and retried 1 time(s); outcomes: no_op -> done
+```
+
+Aider gets `/undo` run against it first, because it auto-commits and the failed attempt is
+already in the history. A `timeout` never retries — the tree may be half-modified. Neither
+does a verdict from the heuristic fallback, which cannot tell a terse success from a no-op
+and would happily re-run work that had already finished.
+
+See `references/dispatch-modes.md` for the rule table and the card schema.
+
+---
+
+## 7. Teaching it a tool it doesn't know
 
 Drop one JSON file in `scripts/cards/`:
 
@@ -312,7 +402,17 @@ Drop one JSON file in `scripts/cards/`:
   "task_fit": { "scaffold": 2, "feature": 4, "bugfix": 5, "refactor": 3, "test": 4,
                 "docs": 2, "review": 3, "research": 0, "ops": 1, "other": 2 },
   "context_class": "medium",
-  "headless": { "argv": ["mytool", "--yes", "-p", "{prompt}"] },
+  "headless": {
+    "argv": ["mytool", "--yes", "{flags}", "-p", "{prompt}"],
+    "modes": {
+      "unattended": { "satisfied_by_base": true, "verified": true },
+      "sandbox":    { "args": ["--worktree"], "verified": true },
+      "readonly":   { "args": ["--dry-run"], "verified": true }
+    },
+    "recovery": {
+      "no_op": { "prompt_prefix": "Your previous run described this work instead of doing it. Make the edits now. Task: " }
+    }
+  },
   "auth_check": { "argv": ["mytool", "status"], "ok_pattern": "logged in" },
   "contract_verified": true
 }
@@ -327,13 +427,20 @@ Two things the demo above should make concrete:
 - **Make sure `argv` can actually write.** Most agent CLIs default to prompting or a
   read-only sandbox in headless mode, which produces the silent no-op from §5. Check for a
   `--yes` / `--auto` / `--sandbox` / `--permission-mode` flag and include it.
+- **`argv` must work with `{flags}` expanding to nothing.** The base contract is the
+  fallback for every task that carries no metrics, so it has to be a complete, runnable,
+  headless invocation on its own. `modes` only ever *adds* to it.
+- **Set `verified` honestly on every mode.** A wrong prompt prefix costs some quality; a
+  wrong flag costs the entire run. If you cannot check it against `--help`, prefer a
+  `prompt_prefix` or leave the mode out — `unavailable: sandbox` is a useful signal, and a
+  flag that kills the process is not.
 
 Run `python -m unittest discover -s tests` afterwards — the card tests catch missing
 `task_fit` keys, a bad `context_class`, and competence lines duplicated from another card.
 
 ---
 
-## 7. Cheat sheet
+## 8. Cheat sheet
 
 ```bash
 # inventory (cached 24h)
@@ -357,8 +464,15 @@ python scripts/supervise.py codex "task" --repo .
 python scripts/supervise.py claude "task" --watch --timeout 1800
 python scripts/supervise.py codex "task" --json
 
+# task-tuned dispatch (agent-native flags from Jev's metrics)
+python scripts/route.py "task" --json > /tmp/d.json
+python scripts/supervise.py claude "task" --signals-file /tmp/d.json
+python scripts/supervise.py claude "task" --signals '{"blast_radius": 3.0}'
+python scripts/supervise.py claude "task" --no-modes   # base contract only
+python scripts/supervise.py claude "task" --retry 0    # no recovery attempt
+
 # tests
-python -m unittest discover -s tests               # 145, offline, free
+python -m unittest discover -s tests               # 212, offline, free
 HELM_LIVE=1 python -m unittest tests.test_jev_live   # 18, live API
 ```
 
@@ -369,7 +483,7 @@ go to your temp directory. Override any of it with `HELM_CREDENTIALS`,
 
 ---
 
-## 8. What to expect to go wrong
+## 9. What to expect to go wrong
 
 **Everything says `judged by: fallback`.** No key, or the key is bad. Run
 `probe.py --check-jev` for the actual reason.

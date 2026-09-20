@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -268,6 +269,203 @@ class TestRealDispatch(unittest.TestCase):
                 self.assertLess(r["elapsed_s"], 30)
             finally:
                 S.RUN_DIR = orig
+
+
+class TestDispatchPlumbing(unittest.TestCase):
+    """The supervisor must launch what the planner planned -- and, with no
+    metrics to plan from, exactly what it used to launch."""
+
+    CARD = {
+        "name": "claude",
+        "headless": {
+            "argv": ["claude", "-p", "--permission-mode", "acceptEdits",
+                     "{flags}", "{prompt}"],
+            "modes": {
+                "unattended": {"args": ["--permission-mode", "bypassPermissions"],
+                               "replaces": ["--permission-mode"], "verified": True},
+                "sandbox": {"args": ["-w"], "verified": True},
+            },
+        },
+    }
+
+    def test_no_signals_renders_the_untouched_contract(self):
+        cmd = S.render_command(self.CARD, "fix it")
+        self.assertEqual(cmd, ["claude", "-p", "--permission-mode", "acceptEdits", "fix it"])
+
+    def test_signals_reach_the_rendered_command(self):
+        cmd = S.render_command(self.CARD, "fix it",
+                               {"needs_human": 0.05, "blast_radius": 3.0})
+        self.assertIn("-w", cmd)
+        self.assertIn("bypassPermissions", cmd)
+        self.assertNotIn("acceptEdits", cmd)
+
+    def test_route_and_supervise_render_the_same_command(self):
+        # "Run the printed command yourself to override" is only safe advice
+        # while the printed command is the one that would have run.
+        import route
+        sig = {"needs_human": 0.05, "blast_radius": 3.0, "task_kind": "refactor"}
+        self.assertEqual(route.render_command(self.CARD, "t", sig),
+                         S.render_command(self.CARD, "t", sig))
+
+
+class TestSignalsParsing(unittest.TestCase):
+    """--signals has to survive whatever shape the caller pipes into it."""
+
+    def test_reads_a_bare_signals_block(self):
+        got = S._load_signals('{"needs_human": 0.1, "task_kind": "refactor"}', None)
+        self.assertEqual(got["needs_human"], 0.1)
+
+    def test_reads_route_json_output_whole(self):
+        raw = json.dumps({
+            "route": {"mode": "auto", "agent": "codex",
+                      "signals": {"needs_human": 0.1, "blast_radius": 3.0,
+                                  "task_kind": "refactor"}},
+            "verdict": {"source": "jev", "answers": {
+                "context_breadth": {"score": 3.0}}},
+        })
+        s = S.dispatch.Signals.from_dict(S._load_signals(raw, None))
+        self.assertEqual(s.task_kind, "refactor")
+        self.assertEqual(s.blast_radius, 3.0)
+        self.assertEqual(s.context_breadth, 3.0)   # picked up from the nested verdict
+
+    def test_nothing_supplied_stays_none(self):
+        self.assertIsNone(S._load_signals(None, None))
+
+    def test_a_file_is_read_when_given(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s.json"
+            p.write_text('{"needs_human": 0.2}', encoding="utf-8")
+            self.assertEqual(S._load_signals(None, str(p))["needs_human"], 0.2)
+
+
+class TestRecoveryLoop(unittest.TestCase):
+    """A `no_op` is a diagnosis, not a dead end -- but only Jev's diagnosis."""
+
+    ECHO = "import sys;print('ARGS', sys.argv[1:])"
+
+    def _reg(self, recovery=None, modes=None):
+        headless = {
+            "argv": [sys.executable, "-c", self.ECHO, "{flags}", "{prompt}"],
+            "modes": modes if modes is not None else {
+                "unattended": {"args": ["--force"], "verified": True}},
+        }
+        if recovery is not None:
+            headless["recovery"] = recovery
+        return {"agents": [{
+            "name": "fake", "installed": True, "path": sys.executable,
+            "status": "installed", "headless": headless,
+            "auth": {"state": "authenticated"},
+        }], "local_inference": {"available": False}}
+
+    RECOVERY = {
+        "no_op": {"prompt_prefix": "APPLY_IT_NOW: ", "modes": ["unattended"],
+                  "note": "tell it to actually edit"},
+    }
+
+    def _run(self, reg, judgements, **kw):
+        """Drive supervise() with a scripted sequence of judge() results."""
+        with tempfile.TemporaryDirectory() as td:
+            orig, S.RUN_DIR = S.RUN_DIR, Path(td)
+            try:
+                with mock.patch.object(S, "judge", side_effect=judgements):
+                    r = S.supervise("fake", "fix the parser", Path("."), 60,
+                                    False, 1, reg, **kw)
+                logs = [Path(a["log"]).read_text(encoding="utf-8")
+                        for a in r.get("attempts", []) if a.get("log")]
+                return r, logs
+            finally:
+                S.RUN_DIR = orig
+
+    def test_a_no_op_is_retried_with_the_cards_own_cure(self):
+        r, logs = self._run(self._reg(recovery=self.RECOVERY),
+                            [verdict("no_op", satisfied=0.1), verdict()])
+        self.assertEqual(len(r["attempts"]), 2)
+        self.assertEqual([a["outcome"] for a in r["attempts"]], ["no_op", "done"])
+        self.assertEqual(r["outcome"], "done")
+        self.assertNotIn("APPLY_IT_NOW", logs[0])
+        self.assertIn("APPLY_IT_NOW", logs[1])      # the cure reached the agent
+        self.assertIn("--force", logs[1])           # so did the mode it forced
+
+    def test_a_fallback_verdict_never_triggers_a_retry(self):
+        r, _ = self._run(self._reg(recovery=self.RECOVERY),
+                         [verdict("no_op", satisfied=0.1, source="fallback"),
+                          verdict()])
+        self.assertEqual(len(r["attempts"]), 1)
+        self.assertTrue(any("fallback" in n for n in r["notes"]))
+
+    def test_the_retry_budget_is_honoured(self):
+        r, _ = self._run(self._reg(recovery=self.RECOVERY),
+                         [verdict("no_op", satisfied=0.1)], max_retries=0)
+        self.assertEqual(len(r["attempts"]), 1)
+        self.assertEqual(r["outcome"], "no_op")
+
+    def test_an_agent_with_no_declared_cure_is_not_retried(self):
+        r, _ = self._run(self._reg(recovery=None), [verdict("no_op", satisfied=0.1)])
+        self.assertEqual(len(r["attempts"]), 1)
+
+    def test_a_clean_run_is_never_retried(self):
+        r, _ = self._run(self._reg(recovery=self.RECOVERY), [verdict()])
+        self.assertEqual(len(r["attempts"]), 1)
+        self.assertEqual(r["outcome"], "done")
+
+    def test_a_cleanup_command_runs_before_the_retry(self):
+        with tempfile.TemporaryDirectory() as td:
+            marker = Path(td) / "undone.txt"
+            rec = {"no_op": {
+                "prompt_prefix": "AGAIN: ",
+                "cleanup": [sys.executable, "-c",
+                            f"open(r'{marker}','w').write('x')"],
+            }}
+            r, _ = self._run(self._reg(recovery=rec),
+                             [verdict("no_op", satisfied=0.1), verdict()])
+            self.assertEqual(len(r["attempts"]), 2)
+            self.assertTrue(marker.exists(), "the card's cleanup never ran")
+            self.assertTrue(any("ran cleanup" in n for n in r["notes"]))
+
+    def test_the_verdict_reports_what_was_injected(self):
+        r, _ = self._run(self._reg(), [verdict()], signals={"needs_human": 0.1})
+        self.assertEqual(r["dispatch"]["modes"], ["unattended"])
+
+    def test_modes_can_be_switched_off_entirely(self):
+        r, logs = self._run(self._reg(), [verdict()],
+                            signals={"needs_human": 0.1}, use_modes=False)
+        self.assertEqual(r["dispatch"]["modes"], [])
+        self.assertNotIn("--force", logs[0])
+
+    def test_retries_share_one_timeout_budget(self):
+        # Two attempts must not quietly take twice as long as the caller asked.
+        reg = self._reg(recovery=self.RECOVERY)
+        reg["agents"][0]["headless"]["argv"] = [
+            sys.executable, "-c", "import time;print('x');time.sleep(600)",
+            "{flags}", "{prompt}"]
+        with tempfile.TemporaryDirectory() as td:
+            orig, S.RUN_DIR = S.RUN_DIR, Path(td)
+            try:
+                started = time.time()
+                r = S.supervise("fake", "t", Path("."), 4, False, 1, reg)
+                self.assertLess(time.time() - started, 30)
+                self.assertEqual(r["outcome"], "timeout")
+            finally:
+                S.RUN_DIR = orig
+
+    def test_the_judge_grades_the_original_task_not_our_scaffolding(self):
+        # Jev must see what the user asked for, not the recovery preamble we
+        # wrapped around it -- otherwise it grades our prompt engineering.
+        seen = []
+
+        def spy(task, *a, **kw):
+            seen.append(task)
+            return verdict("no_op", satisfied=0.1) if len(seen) == 1 else verdict()
+
+        with tempfile.TemporaryDirectory() as td:
+            orig, S.RUN_DIR = S.RUN_DIR, Path(td)
+            try:
+                with mock.patch.object(S, "judge", side_effect=spy):
+                    S.supervise("fake", "fix the parser", Path("."), 60, False, 1,
+                                self._reg(recovery=self.RECOVERY))
+            finally:
+                S.RUN_DIR = orig
+        self.assertEqual(seen, ["fix the parser", "fix the parser"])
 
 
 class TestVerdictIsSmall(unittest.TestCase):

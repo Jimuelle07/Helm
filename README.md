@@ -63,12 +63,13 @@ unattended.
 | `skills/helm/SKILL.md` | Workflow and how to present a recommendation |
 | `skills/helm/scripts/probe.py` | Hardware + PATHEXT-aware agent discovery |
 | `skills/helm/scripts/route.py` | Routing question set, thresholds, fallback scorer |
-| `skills/helm/scripts/supervise.py` | Dispatch + Jev-judged completion |
+| `skills/helm/scripts/supervise.py` | Dispatch, Jev-judged completion, recovery loop |
+| `skills/helm/scripts/dispatch.py` | Jev metrics -> agent-native flags and keywords |
 | `skills/helm/scripts/jev.py` | Shared Jev client |
 | `skills/helm/scripts/keystore.py` | Per-user API key storage |
 | `skills/helm/scripts/cards/` | Capability cards — declared knowledge, one file per agent |
-| `skills/helm/references/` | Card schema, Jev decision layer, calibration |
-| `tests/` | 124 tests; pure layers exhaustively, plus real dispatch |
+| `skills/helm/references/` | Card schema, dispatch modes, Jev decision layer, calibration |
+| `tests/` | 212 tests; pure layers exhaustively, plus real dispatch |
 
 ## Docs
 
@@ -78,7 +79,7 @@ unattended.
 - [`docs/context.md`](docs/context.md) — research notes on what Jev is and is not
 - [`docs/machine-profile.md`](docs/machine-profile.md) — generated snapshot of the development box
 
-## Two failures it exists to prevent
+## Three failures it exists to prevent
 
 **Routing to a CLI that was never logged in.** Installing an agent and authenticating it are
 separate acts, and people routinely do only the first. The CLI passes a `--version` check and
@@ -86,6 +87,14 @@ then fails on its first model call. `probe.py` asks each tool's own status comma
 that reports logged out is pulled from routing and shown with its fix. The rule is asymmetric
 on purpose — *we couldn't find a credential* never blocks (tokens live in keychains no probe
 can read); only *the tool said it's logged out* does.
+
+**Handing every agent the same generic command.** A coding CLI's flags are where its
+safety lives — worktrees, sandboxes, plan modes, permission gates — and a router that
+ignores them throws that away. `dispatch.py` translates Jev's metrics into each agent's own
+vocabulary: a high blast radius becomes `-w`, a `review` task becomes `--approval-mode
+plan` and cannot write, a wide refactor gets told to fan out. Metrics nobody supplied
+change nothing, which is what keeps the layer additive rather than a new way to run `--yolo`
+by accident.
 
 **Spending orchestrator tokens on "is it done yet?"** An agent transcript runs to tens of
 thousands of tokens. Jev reads it for a fraction of a cent and returns a few hundred bytes;

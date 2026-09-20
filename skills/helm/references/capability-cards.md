@@ -29,9 +29,17 @@ agent in `scripts/cards/`, named after the agent.
     "config": ["~/.aider.conf.yml"]
   },
   "headless": {
-    "argv": ["aider", "--message", "{prompt}", "--yes-always"],
+    "argv": ["aider", "{flags}", "--message", "{prompt}", "--yes-always"],
     "model_flag": "--model",
-    "cwd_aware": true
+    "cwd_aware": true,
+    "modes": {                        // optional: see references/dispatch-modes.md
+      "plan": { "args": ["--architect"], "verified": true },
+      "unattended": { "satisfied_by_base": true, "verified": true }
+    },
+    "recovery": {                     // optional: the agent's own cure per outcome
+      "failed": { "cleanup": ["aider", "--message", "/undo", "--yes-always"],
+                  "prompt_prefix": "A previous attempt failed and was rolled back. " }
+    }
   },
   "list_models": ["aider", "--list-models"],   // optional
   "contract_verified": true           // have you actually confirmed argv against --help?
@@ -86,6 +94,14 @@ costs more.
 replaced with the task text as a **single argv element** — never string-concatenated, so
 quotes and ampersands in a prompt cannot break out.
 
+The token `{flags}` is the insertion point for flags the dispatcher injects from Jev's
+metrics — a sandbox flag for a high-blast change, an unattended flag when nobody is
+watching. Unlike `{prompt}` it *splices*, because it only ever holds card-authored
+constants. It is required on any card that declares flag-based `modes`; without it there is
+no non-arbitrary place to put them, and the planner refuses to guess. `argv` must remain a
+working headless invocation on its own, with `{flags}` expanding to nothing — that is what
+makes the whole layer additive. See `references/dispatch-modes.md`.
+
 Set `contract_verified: true` only after confirming the flags against the tool's own
 `--help`. A wrong flag is a silent routing failure: the router looks like it worked and the
 agent never runs. Unverified cards are still usable — they are surfaced as a caveat and
@@ -93,15 +109,20 @@ carry a small scoring penalty.
 
 Verified contracts as of this writing:
 
-| Agent | Headless invocation |
-|---|---|
-| `claude` | `claude -p "<prompt>"` |
-| `codex` | `codex exec "<prompt>"` |
-| `cursor-agent` | `cursor-agent -p "<prompt>"` |
-| `gemini` | `gemini -p "<prompt>"` |
-| `aider` | `aider --message "<prompt>" --yes-always` |
-| `opencode` | `opencode run "<prompt>"` |
-| `copilot` | `copilot -p "<prompt>"` |
+| Agent | Headless invocation | Mode flags verified |
+|---|---|---|
+| `claude` | `claude -p "<prompt>"` | yes |
+| `codex` | `codex exec "<prompt>"` | yes |
+| `gemini` | `gemini -p "<prompt>"` | yes |
+| `aider` | `aider --message "<prompt>" --yes-always` | yes |
+| `opencode` | `opencode run "<prompt>"` | yes |
+| `copilot` | `copilot -p "<prompt>"` | yes |
+| `cursor-agent` | `cursor-agent -p "<prompt>"` | no — not installed when written |
+
+The seven agents that were not installed when these cards were written (`cursor-agent`,
+`crush`, `goose`, `droid`, `amp`, `qwen`, `ollama`) carry `"verified": false` on any
+flag-bearing mode, and mostly use prompt-level directives instead. A wrong prompt prefix
+costs some quality; a wrong flag costs the whole run.
 
 ## `auth_check` -- proving the tool can actually run
 
@@ -157,9 +178,14 @@ only useful with the remedy attached.
 3. Write a `competence` line that contrasts with every existing card.
 4. Fill in all ten `task_fit` values.
 5. Add an `auth_check` and a `LOGIN_HINTS` entry if the CLI has a status command
-6. Run `python -m unittest discover -s tests` — the card tests will catch a missing field,
-   a bad `context_class`, or a duplicated competence line.
-7. Re-probe with `--refresh`, since the registry caches for 24 hours.
+6. Add a `{flags}` slot and a `modes` table so Jev's metrics can reach this agent's own
+   flags — see `references/dispatch-modes.md`. A card without one still routes fine; it
+   simply reports `unavailable: sandbox` and similar when a rule asks for something it
+   cannot express.
+7. Run `python -m unittest discover -s tests` — the card tests will catch a missing field,
+   a bad `context_class`, a duplicated competence line, an unknown mode name, a mode that
+   does nothing, or recovery referencing a mode the card does not declare.
+8. Re-probe with `--refresh`, since the registry caches for 24 hours.
 
 ## A note on `auth`
 
