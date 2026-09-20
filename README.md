@@ -1,138 +1,129 @@
-# jev-harness
+# Helm
 
-An orchestrator that knows what your machine can actually do, and uses
-[TypeSafe Jev](https://typesafe.ai) as a typed decision layer to route each build task to the
-best coding agent you have installed.
+*Steering and control over the coding agents already on your machine.*
 
-## The problem
+**Your coding agent can't see the other coding agents installed next to it.** Helm fixes
+that — and makes sure it never hands work to one that isn't logged in.
 
-An LLM does not know its own tools unless they are called. A coding agent learns what it can do
-from a tool list in its prompt — so the other agent CLIs sitting in the same `PATH`, each with a
-different model, price, context window and speciality, are invisible to it. When an agent does
-stray outside its competence, it finds out by *failing*, and that knowledge dies with the session.
+> Not related to Helm the Kubernetes package manager. This one steers AI coding agents.
 
-On the development box there are **seven** headless-capable coding agents installed side by side,
-and not one of them can name the other six.
+If you have `claude`, `codex`, `cursor-agent`, `gemini`, `aider`, `opencode` and `copilot`
+on your machine, that's seven agents fronting four model families, and not one of them can
+name the other six. An LLM only knows the tools in its prompt. Everything else is invisible
+until something fails.
 
-## The approach
+## What it does
 
-> **The probe observes. Jev judges. The chosen agent generates. Code composes and executes.**
-
-1. **Observe** — `probe.py` reads the hardware, discovers installed agent CLIs, and asks each
-   one whether it is actually logged in. No model calls.
-2. **Judge** — Jev answers seven typed questions about the task in one parallel request.
-3. **Compose** — thresholds and gates turn typed answers into a route. Pure, and fully unit-tested.
-4. **Act** — `supervise.py` dispatches the chosen agent and lets Jev judge whether it finished,
-   so the orchestrating model never has to read the worker's transcript.
-
-The keystone: the answer space handed to Jev is built **from what the probe found**, so
-recommending an agent you do not have is structurally impossible rather than merely unlikely.
-
-## Quick start
-
-No dependencies beyond Python 3.10+.
-
-```bash
-# What does this machine actually have?
-python skills/helm/scripts/probe.py --repo .
-
-# Which agent should handle this?
-python skills/helm/scripts/route.py "add retry logic to the payment client" --repo .
-
-# Run the tests
-python -m unittest discover -s tests
+```
+probe.py      →  what's installed, what's logged in, what this machine can run
+route.py      →  which of those should take this task           (Jev decides)
+supervise.py  →  dispatch it, and tell me when it's actually done (Jev decides)
 ```
 
-Every user configures their own Jev access — the key is never bundled with the skill:
+[TypeSafe Jev](https://typesafe.ai) is a *System One* model: it emits no text, only typed
+decisions — 70–500ms, $0.042 per million input tokens, output free. Cheap enough to run on
+every task instead of only the ones that look hard.
 
-```bash
-python skills/helm/scripts/route.py --set-api-key apikey_...   # once, per user
-python skills/helm/scripts/route.py --clear-api-key        # to remove it
+## Three problems it solves
+
+**1. Recommending a tool you don't have.** The list of options handed to Jev is built from
+what the probe actually found, and Jev cannot return a value outside its declared answer
+space. So suggesting an uninstalled agent isn't unlikely — it's *structurally impossible*.
+
+**2. Routing to a CLI that was never logged in.** Installing an agent and authenticating it
+are separate acts, and people routinely do only the first. The CLI looks fine to a
+`--version` check and then fails on its first model call. `probe.py` asks each tool's own
+status command, and anything that reports logged out is pulled from routing and shown with
+its one-line fix:
+
+```
+INSTALLED BUT NOT AUTHENTICATED (1)  <- log in to use these
+  codex          Not logged in.
+                 fix: codex login
 ```
 
-Stored locally at `~/.cache/helm/credentials.json` (a `TYPESAFE_API_KEY` env var
-always takes precedence if set). Without a key, routing falls back to a deterministic
-scorer whose confidence is capped at 0.5 — a degraded judge may suggest, never act
-unattended.
+The rule is asymmetric on purpose. *We couldn't find a credential* never blocks — tokens
+live in keychains no probe can read. Only *the tool said it's logged out* does.
 
-## Privacy: what stays on your machine
+**3. Burning tokens to ask "is it done yet?"** An agent transcript runs to tens of
+thousands of tokens, and reading one to check completion costs real money and permanently
+fills your orchestrator's context with build noise. Jev reads it instead, for a fraction of
+a cent, and hands back a few hundred bytes:
 
-Helm scans the machine it runs on — installed agent CLIs, hardware, auth state, the
-current repo's path — and writes what it learns to disk. None of that is a build
-artifact meant for the team; it is personal-machine telemetry and a credential, and it
-never belongs in a commit:
+```
+DONE -- codex (completed)
+  Edited src/parser.py and ran the suite: 14 passed
+  exit 0 after 47.2s | judged by jev
+  next: accept
+  full transcript: /tmp/helm-runs/codex-1758.log
+```
 
-| File | What it holds | Default location |
-|---|---|---|
-| `credentials.json` | your TypeSafe API key | `~/.cache/helm/` |
-| `registry.json` | the probe cache: hardware, installed agents, repo path | `~/.cache/helm/` |
-| `decisions.jsonl` | every routed task's intent text and Jev's verdict | `~/.cache/helm/` |
-| agent transcripts | full worker output, can include file contents | system temp dir |
+This catches what an exit code can't. Agents exit 0 after describing work they never did
+(`no_op`), and exit 0 after asking a question into a headless void (`stuck`). `rc == 0`
+reads both as success.
 
-All four default **outside this repository** (`~/.cache/helm`, the system temp dir), so a
-clean checkout never has them, and overriding any of `HELM_CACHE` / `HELM_CREDENTIALS` /
-`HELM_TRACES` / `HELM_RUNS` to a repo-local path is still caught by `.gitignore` as long
-as it lands under `.helm/`.
+## Install
 
-`docs/machine-profile.md`, if you generate one by hand from `probe.py`'s output the way
-`docs/machine-profile.example.md` describes, is gitignored for the same reason — it is a
-snapshot of *your* installed tools and hardware, not the team's. The example file is
-fabricated data, checked in only to illustrate the report's shape.
+Nothing to install. Python 3.10+, standard library only — tested on 3.12, 3.14 and 3.15.
+Works on Windows, macOS and Linux.
 
-## Layout
+```bash
+python scripts/probe.py --repo .
+python scripts/route.py "add retry logic to the payment client" --repo .
+```
 
-| Path | What it is |
-|---|---|
-| `skills/helm/` | **Helm** — the distributable agent skill |
-| `skills/helm/SKILL.md` | Workflow and how to present a recommendation |
-| `skills/helm/scripts/probe.py` | Hardware + PATHEXT-aware agent discovery |
-| `skills/helm/scripts/route.py` | Routing question set, thresholds, fallback scorer |
-| `skills/helm/scripts/supervise.py` | Dispatch, Jev-judged completion, recovery loop |
-| `skills/helm/scripts/dispatch.py` | Jev metrics -> agent-native flags and keywords |
-| `skills/helm/scripts/jev.py` | Shared Jev client |
-| `skills/helm/scripts/keystore.py` | Per-user API key storage |
-| `skills/helm/scripts/cards/` | Capability cards — declared knowledge, one file per agent |
-| `skills/helm/references/` | Card schema, dispatch modes, Jev decision layer, calibration |
-| `tests/` | 224 tests; pure layers exhaustively, plus real dispatch |
+To enable Jev, add your own TypeSafe key once:
+
+```bash
+python scripts/route.py --set-api-key apikey_...
+```
+
+**Without a key it still works.** Routing falls back to a deterministic scorer over the same
+capability cards, with confidence hard-capped at 0.5 — below every accept threshold, so a
+degraded judge can recommend but never act unattended. It always tells you which brain
+answered.
+
+## Teaching it a new agent
+
+Capability cards in `scripts/cards/*.json` are the declared knowledge that makes this work
+without invoking anything. Add one file to support a new CLI:
+
+```jsonc
+{
+  "name": "mytool",
+  "bin_names": ["mytool"],
+  "competence": "Short, contrastive description of what this tool is uniquely good at",
+  "task_fit": { "bugfix": 5, "refactor": 2, "...": 0 },
+  "context_class": "medium",
+  "headless": { "argv": ["mytool", "-p", "{prompt}"] },
+  "auth_check": { "argv": ["mytool", "status"], "ok_pattern": "logged in" }
+}
+```
+
+The `competence` line is what Jev actually reads, so it's a tuned parameter, not
+documentation — write it to *discriminate* against the other cards, not to describe the
+tool in isolation. See `references/capability-cards.md`.
 
 ## Docs
 
-- [`skills/helm/references/walkthrough.md`](skills/helm/references/walkthrough.md) — **start here**: install to end-to-end with real output
-- [`docs/idea.md`](docs/idea.md) — the thesis: the problem, the bet, why Jev is the right shape
-- [`docs/system-design.md`](docs/system-design.md) — the build spec: layers, questions, thresholds
-- [`docs/context.md`](docs/context.md) — research notes on what Jev is and is not
-- [`docs/machine-profile.md`](docs/machine-profile.md) — generated snapshot of the development box
+| File | What's in it |
+|---|---|
+| **`references/walkthrough.md`** | **Start here** — install to end-to-end, with real output |
+| `SKILL.md` | The workflow, and how to present results |
+| `references/capability-cards.md` | Card schema; writing a competence line that routes well |
+| `references/jev-decision-layer.md` | Every question asked, and why each one is independent |
+| `references/calibration.md` | The thresholds, why they're guesses, and how to fit them |
 
-## Three failures it exists to prevent
+## Honest limitations
 
-**Routing to a CLI that was never logged in.** Installing an agent and authenticating it are
-separate acts, and people routinely do only the first. The CLI passes a `--version` check and
-then fails on its first model call. `probe.py` asks each tool's own status command; anything
-that reports logged out is pulled from routing and shown with its fix. The rule is asymmetric
-on purpose — *we couldn't find a credential* never blocks (tokens live in keychains no probe
-can read); only *the tool said it's logged out* does.
-
-**Handing every agent the same generic command.** A coding CLI's flags are where its
-safety lives — worktrees, sandboxes, plan modes, permission gates — and a router that
-ignores them throws that away. `dispatch.py` translates Jev's metrics into each agent's own
-vocabulary: a high blast radius becomes `-w`, a `review` task becomes `--approval-mode
-plan` and cannot write, a wide refactor gets told to fan out. Metrics nobody supplied
-change nothing, which is what keeps the layer additive rather than a new way to run `--yolo`
-by accident.
-
-**Spending orchestrator tokens on "is it done yet?"** An agent transcript runs to tens of
-thousands of tokens. Jev reads it for a fraction of a cent and returns a few hundred bytes;
-the transcript goes to disk. This also catches what an exit code cannot — agents exit 0 after
-describing work they never did, and exit 0 after asking a question into a headless void.
-
-## Status
-
-Working end to end, with one honest gap: **every threshold is uncalibrated.** They are conservative
-starting points, not fitted values, and they are labelled as such everywhere they appear. Decisions
-are logged to `~/.cache/helm/decisions.jsonl` from day one so they *can* be fitted —
-see [`references/calibration.md`](skills/helm/references/calibration.md).
-
-The Jev wire contract is **verified** against the live endpoint (2026-09-20, `jev-1.13.0`): Bearer
-auth, all three question types, and the `jev-1.13.0` pin, which the API validates rather than
-silently ignoring. Confirm your own setup with `probe.py --check-jev`. A routing decision costs
-about $0.00009.
+- **Every threshold is uncalibrated.** They're conservative starting points, labelled as
+  such everywhere they appear. Decisions log to `~/.cache/helm/decisions.jsonl`
+  from day one so they *can* be fitted later.
+- **The Jev wire contract is verified** (2026-09-20, `jev-1.13.0`) — Bearer auth, all three
+  question types, and a pin the API actually validates. `probe.py --check-jev` confirms your
+  own key. What is *not* pinned down is how long `jev-1.13.0` stays current: `GET /v1/models`
+  lists only the `jev-latest` / `jev-preview` aliases, so a concrete version cannot be
+  discovered from the API. Traces record the resolved version so drift is at least detectable.
+- **Six of the 13 cards are unverified.** The seven I could test have their invocation and
+  auth commands confirmed against each tool's `--help`; the rest are best-effort and are
+  flagged as such at runtime.

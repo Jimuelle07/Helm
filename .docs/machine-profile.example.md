@@ -7,7 +7,7 @@
 > Your own copy is personal-machine telemetry — installed CLIs, hardware, local paths — and
 > `.gitignore` deliberately excludes it under this project's convention
 > (`docs/machine-profile.md`, `docs/machine-profile.local.md`). Regenerate it for yourself
-> with `python skills/helm/scripts/probe.py --refresh --repo .`; there is no reason to
+> with `python scripts/probe.py --refresh --repo .`; there is no reason to
 > commit it, and every reason not to.
 
 ## Hardware
@@ -49,7 +49,7 @@ runtime were installed.
 Verify at any time with:
 
 ```
-python skills/helm/scripts/probe.py --check-jev
+python scripts/probe.py --check-jev
 ```
 
 ## Toolchain

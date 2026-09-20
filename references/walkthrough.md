@@ -15,7 +15,7 @@ Total time: about five minutes. Total API cost: under a cent.
 skills add helm
 
 # or drop the folder into your skills directory
-git clone <repo> && cp -r skills/helm ~/.claude/skills/
+git clone <repo> && cp -r . ~/.claude/skills/helm
 ```
 
 There is nothing to build and nothing to `pip install`. The scripts use only the Python

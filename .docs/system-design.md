@@ -248,7 +248,7 @@ in three directions worth recording:
   lives in `references/`, loaded only when the task needs it.
 
 ```
-skills/helm/
+
 ├── SKILL.md                        # workflow + how to present a recommendation
 ├── scripts/
 │   ├── probe.py                    # L1: observe (hardware + PATHEXT-aware discovery)
