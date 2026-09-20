@@ -1,0 +1,13 @@
+{
+  "name": "droid",
+  "display_name": "Factory Droid",
+  "bin_names": ["droid"],
+  "competence": "Spec-driven delivery of a whole task from a written specification, with its own review and validation pass",
+  "strengths": ["works from a written spec", "built-in review step", "handles multi-file delivery"],
+  "weaknesses": ["needs a reasonably complete spec to be worth it", "heavier than a quick edit tool"],
+  "task_fit": {"scaffold": 4, "feature": 5, "bugfix": 3, "refactor": 4, "test": 4, "docs": 3, "review": 4, "research": 2, "ops": 3, "other": 3},
+  "context_class": "large",
+  "auth": {"modes": ["api_key", "subscription"], "env": ["FACTORY_API_KEY"], "config": ["~/.factory"]},
+  "headless": {"argv": ["droid", "exec", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": false
+}

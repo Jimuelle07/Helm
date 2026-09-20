@@ -1,0 +1,13 @@
+{
+  "name": "copilot",
+  "display_name": "GitHub Copilot CLI",
+  "bin_names": ["copilot"],
+  "competence": "GitHub-centric work: issues, pull requests, Actions workflows, and following an existing repository's established conventions",
+  "strengths": ["native GitHub context (issues, PRs, CI)", "good at matching house style", "included with a Copilot seat"],
+  "weaknesses": ["least useful away from a GitHub remote", "more conservative on large refactors"],
+  "task_fit": {"scaffold": 3, "feature": 4, "bugfix": 4, "refactor": 3, "test": 4, "docs": 4, "review": 5, "research": 2, "ops": 4, "other": 3},
+  "context_class": "medium",
+  "auth": {"modes": ["subscription", "oauth"], "env": ["GITHUB_TOKEN", "GH_TOKEN"], "config": ["~/.copilot"]},
+  "headless": {"argv": ["copilot", "-p", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": true
+}

@@ -1,0 +1,13 @@
+{
+  "name": "cursor-agent",
+  "display_name": "Cursor Agent",
+  "bin_names": ["cursor-agent"],
+  "competence": "Edits that first require finding every call site or usage across an unfamiliar repository, using a semantic index rather than grep",
+  "strengths": ["repo-wide semantic search", "good at 'rename/---change this everywhere' tasks", "plan mode for read-only analysis"],
+  "weaknesses": ["depends on its index being current", "less strong on pure greenfield work"],
+  "task_fit": {"scaffold": 2, "feature": 4, "bugfix": 4, "refactor": 5, "test": 3, "docs": 3, "review": 4, "research": 4, "ops": 2, "other": 3},
+  "context_class": "large",
+  "auth": {"modes": ["subscription", "api_key"], "env": ["CURSOR_API_KEY"], "config": []},
+  "headless": {"argv": ["cursor-agent", "-p", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": true
+}

@@ -1,0 +1,13 @@
+{
+  "name": "gemini",
+  "display_name": "Gemini CLI",
+  "bin_names": ["gemini"],
+  "competence": "Very large context sweeps: reading, summarising or auditing big files or whole directories in a single pass",
+  "strengths": ["very large context window", "cheap on long inputs", "good at summarising sprawling material", "generous free tier"],
+  "weaknesses": ["less reliable at long multi-step edit loops", "weaker agentic tool discipline than peers"],
+  "task_fit": {"scaffold": 3, "feature": 3, "bugfix": 3, "refactor": 3, "test": 3, "docs": 5, "review": 4, "research": 5, "ops": 2, "other": 3},
+  "context_class": "xlarge",
+  "auth": {"modes": ["oauth", "api_key"], "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"], "config": ["~/.gemini"]},
+  "headless": {"argv": ["gemini", "-p", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": true
+}

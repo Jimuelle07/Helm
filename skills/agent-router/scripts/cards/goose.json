@@ -1,0 +1,13 @@
+{
+  "name": "goose",
+  "display_name": "Goose",
+  "bin_names": ["goose"],
+  "competence": "Extension-driven automation where the task needs external systems wired in via MCP rather than pure code editing",
+  "strengths": ["strong MCP/extension ecosystem", "provider-agnostic", "good at multi-system glue work"],
+  "weaknesses": ["setup-heavy for simple edits", "quality tracks the configured backing model"],
+  "task_fit": {"scaffold": 3, "feature": 3, "bugfix": 3, "refactor": 2, "test": 2, "docs": 2, "review": 2, "research": 3, "ops": 5, "other": 3},
+  "context_class": "large",
+  "auth": {"modes": ["api_key"], "env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"], "config": ["~/.config/goose"]},
+  "headless": {"argv": ["goose", "run", "-t", "{prompt}"], "model_flag": null, "cwd_aware": true},
+  "contract_verified": false
+}

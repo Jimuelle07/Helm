@@ -1,0 +1,13 @@
+{
+  "name": "qwen",
+  "display_name": "Qwen Code",
+  "bin_names": ["qwen"],
+  "competence": "Cost-sensitive coding work on open-weight Qwen models, including self-hosted endpoints",
+  "strengths": ["low cost", "can point at self-hosted inference", "generous free quota"],
+  "weaknesses": ["weaker on long-horizon agentic work than frontier models"],
+  "task_fit": {"scaffold": 3, "feature": 3, "bugfix": 3, "refactor": 2, "test": 3, "docs": 3, "review": 2, "research": 2, "ops": 2, "other": 3},
+  "context_class": "large",
+  "auth": {"modes": ["oauth", "api_key"], "env": ["DASHSCOPE_API_KEY", "OPENAI_API_KEY"], "config": ["~/.qwen"]},
+  "headless": {"argv": ["qwen", "-p", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": false
+}

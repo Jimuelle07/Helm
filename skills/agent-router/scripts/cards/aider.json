@@ -1,0 +1,13 @@
+{
+  "name": "aider",
+  "display_name": "Aider",
+  "bin_names": ["aider"],
+  "competence": "Surgical edits to one or a few named files, committed to git automatically; needs the target to be identified up front",
+  "strengths": ["precise minimal diffs", "git-native with automatic commits", "cheap per edit", "works with many model backends"],
+  "weaknesses": ["will not explore a repo to find its own target", "weak on architecture-level decisions"],
+  "task_fit": {"scaffold": 2, "feature": 3, "bugfix": 5, "refactor": 3, "test": 4, "docs": 3, "review": 2, "research": 0, "ops": 1, "other": 2},
+  "context_class": "medium",
+  "auth": {"modes": ["api_key"], "env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"], "config": ["~/.aider.conf.yml"]},
+  "headless": {"argv": ["aider", "--message", "{prompt}", "--yes-always"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": true
+}

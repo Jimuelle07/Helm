@@ -1,0 +1,14 @@
+{
+  "name": "opencode",
+  "display_name": "OpenCode",
+  "bin_names": ["opencode"],
+  "competence": "Provider-agnostic terminal agent; the right pick when a specific non-default model or a self-hosted provider has to be used",
+  "strengths": ["swaps model providers freely", "can drive local/self-hosted endpoints", "lists its own available models"],
+  "weaknesses": ["quality tracks whichever backing model is configured", "smaller ecosystem than the first-party CLIs"],
+  "task_fit": {"scaffold": 3, "feature": 4, "bugfix": 4, "refactor": 3, "test": 3, "docs": 3, "review": 3, "research": 3, "ops": 3, "other": 3},
+  "context_class": "large",
+  "auth": {"modes": ["api_key", "oauth"], "env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"], "config": ["~/.config/opencode"]},
+  "headless": {"argv": ["opencode", "run", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "list_models": ["opencode", "models"],
+  "contract_verified": true
+}

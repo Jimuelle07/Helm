@@ -1,0 +1,13 @@
+{
+  "name": "crush",
+  "display_name": "Crush",
+  "bin_names": ["crush"],
+  "competence": "Fast provider-agnostic terminal agent for quick edits when a lightweight loop matters more than deep reasoning",
+  "strengths": ["fast startup", "many providers", "low overhead"],
+  "weaknesses": ["shallower planning than the frontier CLIs", "quality tracks the backing model"],
+  "task_fit": {"scaffold": 3, "feature": 3, "bugfix": 4, "refactor": 2, "test": 3, "docs": 3, "review": 2, "research": 2, "ops": 2, "other": 3},
+  "context_class": "medium",
+  "auth": {"modes": ["api_key"], "env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"], "config": []},
+  "headless": {"argv": ["crush", "run", "{prompt}"], "model_flag": "--model", "cwd_aware": true},
+  "contract_verified": false
+}

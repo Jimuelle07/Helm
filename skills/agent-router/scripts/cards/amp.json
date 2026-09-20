@@ -1,0 +1,13 @@
+{
+  "name": "amp",
+  "display_name": "Amp",
+  "bin_names": ["amp"],
+  "competence": "Autonomous multi-step coding runs where the agent is expected to keep going for a long stretch without check-ins",
+  "strengths": ["long autonomous runs", "parallel subagents", "strong on large tasks"],
+  "weaknesses": ["less controllable mid-run", "can be costly on open-ended briefs"],
+  "task_fit": {"scaffold": 4, "feature": 5, "bugfix": 4, "refactor": 4, "test": 4, "docs": 3, "review": 3, "research": 3, "ops": 2, "other": 3},
+  "context_class": "xlarge",
+  "auth": {"modes": ["api_key", "subscription"], "env": ["AMP_API_KEY"], "config": []},
+  "headless": {"argv": ["amp", "-x", "{prompt}"], "model_flag": null, "cwd_aware": true},
+  "contract_verified": false
+}
