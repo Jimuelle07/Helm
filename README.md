@@ -46,7 +46,7 @@ python -m unittest discover -s tests
 Every user configures their own Jev access — the key is never bundled with the skill:
 
 ```bash
-python skills/agent-router/scripts/route.py --set-api-key sk-...   # once, per user
+python skills/agent-router/scripts/route.py --set-api-key apikey_...   # once, per user
 python skills/agent-router/scripts/route.py --clear-api-key        # to remove it
 ```
 
@@ -98,6 +98,7 @@ starting points, not fitted values, and they are labelled as such everywhere the
 are logged to `~/.cache/agent-router/decisions.jsonl` from day one so they *can* be fitted —
 see [`references/calibration.md`](skills/agent-router/references/calibration.md).
 
-The raw-HTTP encoding of Jev questions is also inferred from the documented SDK surface rather than
-verified against a live endpoint, since this machine has no API key. The SDK path is authoritative
-where the SDK is installed, and any failure degrades to the fallback scorer rather than breaking.
+The Jev wire contract is **verified** against the live endpoint (2026-09-20, `jev-1.13.0`): Bearer
+auth, all three question types, and the `jev-1.13.0` pin, which the API validates rather than
+silently ignoring. Confirm your own setup with `probe.py --check-jev`. A routing decision costs
+about $0.00009.

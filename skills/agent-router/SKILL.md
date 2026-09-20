@@ -51,17 +51,21 @@ If the user wants live Jev judgement and `probe.py` reports no key configured, a
 for their TypeSafe API key (from `docs.typesafe.ai` / their TypeSafe account) and run:
 
 ```bash
-python scripts/route.py --set-api-key sk-...
+python scripts/route.py --set-api-key apikey_...
 ```
 
 This stores the key locally at `~/.cache/agent-router/credentials.json` (owner-only
 permissions on POSIX) and it is picked up on every future call — nothing else to
-configure. `--clear-api-key` removes it. A `TYPESAFE_API_KEY` environment variable, if
+configure. `--clear-api-key` removes it. Confirm it works with one live request:
+
+```bash
+python scripts/probe.py --check-jev
+``` A `TYPESAFE_API_KEY` environment variable, if
 set, always takes precedence over the stored key, which is useful for CI or a temporary
 override without disturbing what is stored.
 
 **Never print, log, or echo the key itself** — confirmation messages only ever show a
-masked form (`sk-ab...cd12`). Without a key, everything still works: routing falls back to
+masked form (`apike...bf32`). Without a key, everything still works: routing falls back to
 a deterministic scorer whose confidence is hard-capped at 0.5, so it can recommend but
 never auto-execute. Tell the user this plainly rather than silently degrading.
 

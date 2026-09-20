@@ -736,7 +736,7 @@ def summarize(reg: dict) -> str:
     else:
         lines.append("  Jev: no API key configured -- route.py will use the deterministic")
         lines.append("       fallback scorer and cap its confidence at 0.5 (recommend-only)")
-        lines.append("       Set one with:  python probe.py --set-api-key sk-...")
+        lines.append("       Set one with:  python probe.py --set-api-key apikey_...")
 
     if reg.get("repo"):
         r = reg["repo"]
@@ -762,12 +762,35 @@ def main() -> int:
     ap.add_argument("--no-verify-auth", action="store_true",
                     help="skip asking each CLI whether it is logged in (faster, "
                          "but unauthenticated agents will not be filtered out)")
+    ap.add_argument("--check-jev", action="store_true",
+                    help="make one live Jev request to confirm the API key works, then exit")
     keystore.add_key_args(ap)
     args = ap.parse_args()
 
     key_result = keystore.handle_key_args(args)
     if key_result is not None:
         return key_result
+
+    if args.check_jev:
+        import jev
+        result = jev.check()
+        if result["ok"]:
+            u = result.get("usage") or {}
+            cost = (u.get("input_tokens", 0) * 0.042) / 1_000_000
+            print(f"Jev OK -- {result['detail']}")
+            print(f"  key source      : {result['key_source']}")
+            print(f"  model requested : {result['model_requested']}")
+            print(f"  model resolved  : {result['model_resolved']}")
+            if result["model_resolved"] and result["model_resolved"] != result["model_requested"]:
+                print("  WARNING: resolved version differs from the pin -- any "
+                      "calibrated thresholds are suspect")
+            print(f"  usage           : {u.get('input_tokens')} in / "
+                  f"{u.get('output_tokens')} out  (~${cost:.7f})")
+            return 0
+        print(f"Jev NOT working ({result['stage']}): {result['detail']}", file=sys.stderr)
+        if result["stage"] == "key":
+            print("  fix: python probe.py --set-api-key apikey_...", file=sys.stderr)
+        return 1
 
     repo_root = Path(args.repo).resolve() if args.repo else None
     reg = load_cached(args.refresh, repo_root, not args.no_version,

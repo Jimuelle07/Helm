@@ -131,7 +131,7 @@ makes it a serial call by construction, which is the distinction drawn above.
 | Item | Value |
 |---|---|
 | Endpoint | `POST https://api.typesafe.ai/v1/systemone` |
-| Auth | a per-user key (`sk-...`), resolved by `keystore.py` |
+| Auth | `Bearer <key>`, a per-user `apikey_...`, resolved by `keystore.py` |
 | Python SDK | `pip install typesafe-sdk` |
 | JS/TS SDK | `npm install @typesafe-ai/sdk` |
 | Model | pin `jev-1.13.0`, **not** `jev-latest` |
@@ -159,12 +159,23 @@ response.answers["blast_radius"].score # -> 2.4
 response.answers["needs_human"].noul   # -> 0.12
 ```
 
-`route.py` uses the SDK when it is importable, since the SDK owns the wire format, and
-otherwise falls back to a raw `urllib` POST. **The raw encoding in `_encode_question()` is
-inferred from the documented SDK surface, not verified against a live endpoint.** If that
-path returns a 400, check the current schema at `docs.typesafe.ai` and fix that one
-function; the SDK path is unaffected, and any failure degrades to the deterministic scorer
-rather than breaking the tool.
+`route.py` and `supervise.py` both go through `jev.py`, which uses the official SDK when it
+is importable and otherwise posts directly.
+
+**The raw-HTTP contract is verified** against the live endpoint (2026-09-20, `jev-1.13.0`):
+
+- `Authorization: Bearer <key>` — an `x-api-key` header is rejected with 403.
+- `model` is **required**; omitting it returns 422.
+- Questions encode as `{"type": "choice"|"score"|"noul", "instructions": ..., "criteria": ...}`,
+  exactly as the SDK surface suggested.
+- Responses carry `usage: {input_tokens, output_tokens}`, which `route.py` records in each
+  trace — a full seven-question routing decision runs about 2,160 input tokens, or $0.00009.
+
+One asymmetry worth knowing when reading answers back: a `choice` keys its `probabilities`
+by option name, while a `score` keys them by stringified index (`"0"`, `"1"`, …) and ships a
+`legend` mapping those indices to the level text.
+
+Run `probe.py --check-jev` to confirm a key against the live API before relying on it.
 
 ## Pin the model version
 

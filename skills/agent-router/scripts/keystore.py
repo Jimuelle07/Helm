@@ -125,11 +125,13 @@ def handle_key_args(args) -> int | None:
     should continue with its normal work."""
     if getattr(args, "set_api_key", None):
         key = args.set_api_key
-        if not key.startswith("sk-"):
-            print(
-                "warning: TypeSafe keys normally start with 'sk-' -- storing it anyway, "
-                "since the format may change.",
-            )
+        # Observed live format is `apikey_<id>_<secret>`. `sk-` is accepted too
+        # because some docs still describe that shape. Anything else is stored
+        # anyway with a nudge -- refusing an unfamiliar prefix would be a
+        # guaranteed future bug the first time TypeSafe changes it.
+        if not key.startswith(("apikey_", "sk-")):
+            print("note: that does not look like a TypeSafe key "
+                  "(expected 'apikey_...'), but storing it anyway.")
         set_api_key(key)
         print(f"Stored TypeSafe API key ({mask(key)}) at {CREDENTIALS_PATH}")
         print("Jev is now available. Run probe.py to confirm.")

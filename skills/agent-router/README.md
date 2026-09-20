@@ -71,7 +71,7 @@ python scripts/route.py "add retry logic to the payment client" --repo .
 To enable Jev, add your own TypeSafe key once:
 
 ```bash
-python scripts/route.py --set-api-key sk-...
+python scripts/route.py --set-api-key apikey_...
 ```
 
 **Without a key it still works.** Routing falls back to a deterministic scorer over the same
@@ -114,9 +114,11 @@ tool in isolation. See `references/capability-cards.md`.
 - **Every threshold is uncalibrated.** They're conservative starting points, labelled as
   such everywhere they appear. Decisions log to `~/.cache/agent-router/decisions.jsonl`
   from day one so they *can* be fitted later.
-- **The raw-HTTP Jev encoding is inferred** from the documented SDK surface, not verified
-  against a live endpoint. Where `typesafe-sdk` is installed it's used instead and is
-  authoritative; either way a failure degrades to the fallback rather than breaking.
+- **The Jev wire contract is verified** (2026-09-20, `jev-1.13.0`) — Bearer auth, all three
+  question types, and a pin the API actually validates. `probe.py --check-jev` confirms your
+  own key. What is *not* pinned down is how long `jev-1.13.0` stays current: `GET /v1/models`
+  lists only the `jev-latest` / `jev-preview` aliases, so a concrete version cannot be
+  discovered from the API. Traces record the resolved version so drift is at least detectable.
 - **Six of the 13 cards are unverified.** The seven I could test have their invocation and
   auth commands confirmed against each tool's `--help`; the rest are best-effort and are
   flagged as such at runtime.

@@ -464,7 +464,14 @@ def write_trace(intent: str, reg: dict, verdict: dict, route: dict) -> None:
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "intent": intent,
         "source": verdict.get("source"),
-        "model": JEV_MODEL if verdict.get("source") == "jev" else None,
+        # Two different models, on purpose. `model_requested` is our pin;
+        # `model` is the version the API says it actually ran. Recording the
+        # resolved one is what makes drift detectable after the fact -- if a
+        # pin is ever loosened to an alias, these stop matching and every
+        # threshold fitted against the old version is suspect.
+        "model_requested": JEV_MODEL if verdict.get("source") == "jev" else None,
+        "model": verdict.get("model"),
+        "usage": verdict.get("usage"),
         "routable": [a["name"] for a in reg["agents"] if a["routable"]],
         "answers": verdict.get("answers", {}),
         "route": {k: route.get(k) for k in ("mode", "agent", "gates", "signals")},

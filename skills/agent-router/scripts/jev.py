@@ -29,8 +29,18 @@ sys.path.insert(0, str(Path(__file__).parent))
 import keystore  # noqa: E402
 
 ENDPOINT = os.environ.get("TYPESAFE_ENDPOINT", "https://api.typesafe.ai/v1/systemone")
+MODELS_ENDPOINT = os.environ.get(
+    "TYPESAFE_MODELS_ENDPOINT", "https://api.typesafe.ai/v1/models")
+
 # Pinned, not `jev-latest`: thresholds calibrated against one model version are
 # silently invalidated by an alias shift. The pin lives next to what it protects.
+#
+# Confirmed on 2026-09-20 that this is a real pin and not decoration: the API
+# validates it (`jev-9.99.9` -> 400 "Unknown model"), and every response echoes
+# the version it actually ran. Note that GET /v1/models lists only the aliases
+# `jev-latest` and `jev-preview` -- concrete versions are accepted but not
+# enumerated, so this string cannot be discovered from the API and has to be
+# read off a response (or the changelog) when it is time to move it.
 MODEL = os.environ.get("TYPESAFE_MODEL", "jev-1.13.0")
 TIMEOUT = 15
 
@@ -63,13 +73,28 @@ def available() -> bool:
 def _encode_question(q: dict) -> dict:
     """Wire encoding for one question on the raw-HTTP path.
 
-    NOTE: inferred from the documented SDK surface (Choice/Score/Noul with
-    `instructions` plus `criteria`), not verified against a live endpoint --
-    this project has no configured API key to test against. If the raw-HTTP
-    path 400s, check the current schema at docs.typesafe.ai and fix it here;
-    the SDK path is authoritative and unaffected. Any failure falls through to
-    the caller's deterministic fallback, so a wrong guess degrades the answer
-    rather than breaking the tool.
+    VERIFIED against the live endpoint on 2026-09-20 with jev-1.13.0. The
+    observed contract:
+
+      POST /v1/systemone
+        Authorization: Bearer <key>          (x-api-key is rejected, 403)
+        {"model": "...",                      (required -- omitting it 422s)
+         "state": <object>,
+         "questions": {"<key>": {"type": "choice"|"score"|"noul",
+                                 "instructions": "...",
+                                 "criteria": {...} | [...]}}}
+
+      -> {"model": "jev-1.13.0",              (the RESOLVED version, see below)
+          "answers": {"<key>": {"type": ..., "choice"/"score"/"noul": ...,
+                                "confidence": float,     (choice & score only)
+                                "probabilities": {...},  (choice: by option name;
+                                                          score: by index string)
+                                "legend": {...}}},       (score only: index -> label)
+          "usage": {"input_tokens": int, "output_tokens": int}}
+
+    A `score` answer keys its probabilities by stringified index ("0", "1", ...)
+    and ships a `legend` mapping those back to the level text -- unlike `choice`,
+    which keys by option name. Worth knowing before reading either one.
     """
     return {k: v for k, v in q.items() if v is not None}
 
@@ -80,7 +105,7 @@ def ask(state: dict, questions: dict) -> dict:
     if not api_key:
         raise JevUnavailable(
             "no TypeSafe API key configured. Run "
-            "`python route.py --set-api-key sk-...` once, or set TYPESAFE_API_KEY."
+            "`python route.py --set-api-key apikey_...` once, or set TYPESAFE_API_KEY."
         )
 
     blob = json.dumps(state)
@@ -132,10 +157,41 @@ def ask(state: dict, questions: dict) -> dict:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", "replace")[:300]
+        # HTTPError is file-like; closing it keeps the connection from being
+        # reclaimed noisily by the GC on the error path.
+        with exc:
+            body = exc.read().decode("utf-8", "replace")[:300]
         raise JevUnavailable(f"HTTP {exc.code}: {body}") from exc
     except Exception as exc:
         raise JevUnavailable(str(exc)) from exc
+
+
+def check() -> dict:
+    """Live connectivity + credential check. Used by `probe.py --check-jev`.
+
+    Sends the smallest possible real request rather than just hitting /models,
+    because a key can be valid for listing and still fail on inference, and
+    the failure we care about is the one that happens at routing time.
+    """
+    if not available():
+        return {"ok": False, "stage": "key",
+                "detail": "no API key configured -- run `route.py --set-api-key ...`"}
+    try:
+        resp = ask({"ping": "connectivity check"},
+                   {"ok": noul("This is a connectivity check")})
+    except JevUnavailable as exc:
+        return {"ok": False, "stage": "request", "detail": str(exc)}
+
+    usage = resp.get("usage") or {}
+    return {
+        "ok": True,
+        "stage": "done",
+        "model_requested": MODEL,
+        "model_resolved": resp.get("model"),
+        "usage": usage,
+        "key_source": keystore.key_source(),
+        "detail": "Jev answered",
+    }
 
 
 def answer(resp: dict, key: str, field: str, default: float = 0.0) -> float:
