@@ -56,12 +56,14 @@
       "unattended": {
         "satisfied_by_base": true,
         "verified": true,
-        "note": "`codex exec` is non-interactive by construction; it never prompts"
+        "note": "`codex exec` is non-interactive by construction; it never prompts",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "sandbox": {
         "satisfied_by_base": true,
         "verified": true,
-        "note": "`--sandbox workspace-write` in the base contract already confines writes"
+        "note": "`--sandbox workspace-write` in the base contract already confines writes",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "readonly": {
         "args": [
@@ -73,15 +75,18 @@
           "-s"
         ],
         "verified": true,
-        "note": "downgrades the sandbox so the run cannot write at all"
+        "note": "downgrades the sandbox so the run cannot write at all. The cheat sheet's --approval-mode does not exist in the installed `codex exec`; -s/--sandbox is what it has",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "plan": {
-        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "prompt_prefix": "Analyze in sandbox and decompose into parallel tasks before making any change. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
-        "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
-        "verified": true
+        "prompt_prefix": "Map-reduce this across the repository: decompose into parallel tasks, fan the sub-checks out across modules, then synthesise one coherent change. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {

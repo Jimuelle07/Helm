@@ -541,6 +541,7 @@ def supervise(agent_name: str, task: str, cwd: Path, timeout: float,
         "modes": list(plan.modes),
         "unavailable": list(plan.unmet),
         "unverified": list(plan.unverified),
+        "advisory": list(plan.advisory),
         "argv": plan.argv[:1] + ["..."] if plan.argv else [],
     }
     for n in plan.notes:
@@ -706,6 +707,9 @@ def render(v: dict) -> str:
             bits.append("modes " + ", ".join(d["modes"]))
         if d.get("unavailable"):
             bits.append("unavailable " + ", ".join(d["unavailable"]))
+        risky = [m for m in (d.get("advisory") or []) if m in dispatch.SAFETY_MODES]
+        if risky:
+            bits.append("advisory only " + ", ".join(risky))
         lines.append("  " + " | ".join(bits))
     if v.get("signals"):
         s = v["signals"]

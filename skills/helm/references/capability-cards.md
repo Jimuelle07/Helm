@@ -119,10 +119,11 @@ Verified contracts as of this writing:
 | `copilot` | `copilot -p "<prompt>"` | yes |
 | `cursor-agent` | `cursor-agent -p "<prompt>"` | no — not installed when written |
 
-The seven agents that were not installed when these cards were written (`cursor-agent`,
-`crush`, `goose`, `droid`, `amp`, `qwen`, `ollama`) carry `"verified": false` on any
-flag-bearing mode, and mostly use prompt-level directives instead. A wrong prompt prefix
-costs some quality; a wrong flag costs the whole run.
+Mode flags for the other agents come from the *CLI Coding Agents Cheat Sheet* and carry
+`"verified": false` plus a `source`, because a document is not the binary — the sheet
+describes a `--approval-mode` that the installed `codex exec` does not have, and a Copilot
+CLI that is a different tool from the one on this machine. See
+`references/dispatch-modes.md` for the provenance table and both discrepancies.
 
 ## `auth_check` -- proving the tool can actually run
 

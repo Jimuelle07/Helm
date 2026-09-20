@@ -53,21 +53,25 @@
       "unattended": {
         "satisfied_by_base": true,
         "verified": false,
-        "note": "`goose run -t` is non-interactive; no separate approval flag confirmed"
+        "note": "`goose run` is the documented headless, non-interactive batch form",
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "plan": {
-        "prompt_prefix": "/plan Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
+        "prompt_prefix": "Work out the structure first -- which files to create, what each is responsible for, and the interfaces between them -- then implement it. Task: ",
         "verified": true,
-        "note": "goose's own /plan directive, per the cheat sheet"
+        "note": "deliberately NOT /plan: that directive is read-only until /endplan, which is unreachable in a single headless run",
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
         "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "readonly": {
-        "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
+        "prompt_prefix": "/plan ",
         "verified": true,
-        "note": "advisory only -- no read-only flag confirmed"
+        "note": "/plan locks goose into a read-only architectural phase; it stays there until /endplan, which a one-shot headless run never gets to send",
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {
@@ -91,5 +95,6 @@
       }
     }
   },
-  "contract_verified": false
+  "contract_verified": false,
+  "card_note": "goose treats `stop`, `halt`, `cancel`, `wait` and `hold on` as interrupt keywords that abort the active tool loop, and `actually`, `instead`, `change of plans` as pivot keywords. A task phrased with one of those may halt the run."
 }

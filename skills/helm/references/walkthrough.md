@@ -472,7 +472,7 @@ python scripts/supervise.py claude "task" --no-modes   # base contract only
 python scripts/supervise.py claude "task" --retry 0    # no recovery attempt
 
 # tests
-python -m unittest discover -s tests               # 212, offline, free
+python -m unittest discover -s tests               # 224, offline, free
 HELM_LIVE=1 python -m unittest tests.test_jev_live   # 18, live API
 ```
 

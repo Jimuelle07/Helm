@@ -69,7 +69,7 @@ unattended.
 | `skills/helm/scripts/keystore.py` | Per-user API key storage |
 | `skills/helm/scripts/cards/` | Capability cards — declared knowledge, one file per agent |
 | `skills/helm/references/` | Card schema, dispatch modes, Jev decision layer, calibration |
-| `tests/` | 212 tests; pure layers exhaustively, plus real dispatch |
+| `tests/` | 224 tests; pure layers exhaustively, plus real dispatch |
 
 ## Docs
 

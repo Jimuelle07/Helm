@@ -137,9 +137,10 @@ Two things to tell the user when they come up:
 - `modes this agent cannot express: sandbox` means the chosen CLI has no way to do what the
   metrics asked for. It is not an error, but it is worth saying out loud on a high-blast
   task — offer a worktree, or a different agent.
-- `caveat: injected flags for X are unverified` means that flag came from a cheat sheet
-  rather than from the CLI's own `--help`. Seven of the thirteen cards were written on a
-  machine where those tools were not installed.
+- `caveat: injected flags for X are unverified` means that flag came from the CLI cheat
+  sheet rather than from the CLI's own `--help`. The accompanying note names the source.
+  Six agents (claude, codex, gemini, aider, opencode, copilot) were verified against a live
+  `--help`; the rest are documented but unconfirmed.
 
 ### 3. Hand off, and let Jev tell you when it is done
 

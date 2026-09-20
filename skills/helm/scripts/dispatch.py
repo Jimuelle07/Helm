@@ -243,6 +243,25 @@ def supports(card: dict, mode: str) -> bool:
     return mode in card_modes(card)
 
 
+# Modes where being merely advisory is a safety gap rather than a quality one.
+# "Do not write any files" that the model may disregard is not containment, and
+# a caller who reads `modes: readonly` is entitled to know which of the two
+# they got.
+SAFETY_MODES = frozenset({"readonly", "sandbox"})
+
+
+def is_enforced(spec: dict) -> bool:
+    """Does the tool guarantee this mode, or are we just asking politely?
+
+    A flag the CLI parses is enforcement: `gemini --approval-mode plan` cannot
+    write, whatever the model decides. A prompt prefix is advice -- including a
+    slash directive like Goose's `/plan`, which is only as reliable as the
+    agent's own handling of it. The distinction is derivable from the entry, so
+    no card has to declare it and none can get it wrong.
+    """
+    return bool(spec.get("args") or spec.get("satisfied_by_base"))
+
+
 def _strip_flags(argv: list[str], names: list[str]) -> list[str]:
     """Remove `names` and their values from argv.
 
@@ -294,6 +313,7 @@ class Plan:
     unmet: tuple[str, ...] = ()          # requested but this card cannot express
     notes: tuple[str, ...] = ()
     unverified: tuple[str, ...] = ()     # applied from an unverified card entry
+    advisory: tuple[str, ...] = ()       # applied by asking nicely, not by enforcement
 
 
 def _expand(argv_template: list[str], flags: list[str], prompt: str) -> list[str]:
@@ -346,6 +366,7 @@ def plan(card: dict, task: str, signals: dict | Signals | None = None,
     applied: list[str] = []
     unmet: list[str] = []
     unverified: list[str] = []
+    advisory: list[str] = []
     notes: list[str] = []
     flags: list[str] = []
     removals: list[str] = []
@@ -361,6 +382,20 @@ def plan(card: dict, task: str, signals: dict | Signals | None = None,
         applied.append(mode)
         if not spec.get("verified", False):
             unverified.append(mode)
+            # Provenance, not just a warning flag. "Came from the published
+            # cheat sheet" and "was inferred" are very different levels of
+            # trust, and the caller deciding whether to run the command is
+            # the one who needs to tell them apart.
+            notes.append(
+                f"{mode}: flags not confirmed against this CLI's --help "
+                f"(source: {spec.get('source', 'unknown')})")
+
+        if not is_enforced(spec):
+            advisory.append(mode)
+            if mode in SAFETY_MODES:
+                notes.append(
+                    f"{mode} is ADVISORY on {card.get('name')} -- the agent is "
+                    "instructed, not prevented. Do not treat it as containment")
 
         if spec.get("satisfied_by_base"):
             note = spec.get("note") or "already guaranteed by the base contract"
@@ -431,6 +466,7 @@ def plan(card: dict, task: str, signals: dict | Signals | None = None,
         unmet=tuple(dict.fromkeys(unmet)),
         notes=tuple(notes),
         unverified=tuple(unverified),
+        advisory=tuple(m for m in advisory if m in applied),
     )
 
 

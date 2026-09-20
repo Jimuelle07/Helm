@@ -62,14 +62,16 @@
           "--permission-mode"
         ],
         "verified": true,
-        "note": "skips every permission check; the base contract only auto-accepts edits"
+        "note": "skips every permission check; the base contract only auto-accepts edits",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "sandbox": {
         "args": [
           "-w"
         ],
         "verified": true,
-        "note": "runs the session in a fresh git worktree, so the live tree is untouched"
+        "note": "runs the session in a fresh git worktree, so the live tree is untouched",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "readonly": {
         "args": [
@@ -80,15 +82,18 @@
           "--permission-mode"
         ],
         "verified": true,
-        "note": "plan mode: Claude reads and reasons but cannot write"
+        "note": "plan mode: Claude reads and reasons but cannot write",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "plan": {
         "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
         "prompt_prefix": "Fan out subagents in parallel to cover the independent parts of this change, then reconcile their work into one coherent result. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {

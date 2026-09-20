@@ -56,20 +56,24 @@
       "unattended": {
         "satisfied_by_base": true,
         "verified": true,
-        "note": "`--auto` in the base contract already auto-approves permissions"
+        "note": "`--auto` in the base contract already auto-approves permissions",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "plan": {
         "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
         "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "readonly": {
         "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
         "verified": true,
-        "note": "advisory only -- opencode has no read-only flag, so this is an instruction the model can disregard"
+        "note": "advisory only -- opencode has no read-only flag, so this is an instruction the model can disregard",
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {
@@ -89,7 +93,7 @@
       },
       "failed": {
         "prompt_prefix": "A previous attempt at this task errored out. Inspect the working tree for half-applied changes, clean them up, then complete the task. Task: ",
-        "note": "re-dispatch after checking the tree for partial work"
+        "note": "opencode has /undo (Ctrl+X U) to revert the last tool execution, but only interactively -- whether `opencode run` treats a leading /undo as a command or as a prompt is unconfirmed, so it is not wired up as a cleanup"
       }
     }
   },

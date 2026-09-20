@@ -50,20 +50,25 @@
       "unattended": {
         "satisfied_by_base": true,
         "verified": false,
-        "note": "`amp {flags}` is non-interactive; no separate approval flag confirmed"
+        "note": "`amp {flags}` is non-interactive; no separate approval flag confirmed",
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "plan": {
-        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "prompt_prefix": "Consult the Oracle on the architecture before writing anything, then implement the result. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet",
+        "note": "'Consult the Oracle' routes to a high-reasoning frontier model for architectural decisions"
       },
       "parallel": {
-        "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
-        "verified": true
+        "prompt_prefix": "Dispatch subagents to work the independent parts of this in parallel, then reconcile. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "readonly": {
         "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
         "verified": true,
-        "note": "advisory only -- no read-only flag confirmed"
+        "note": "advisory only -- no read-only flag confirmed",
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {

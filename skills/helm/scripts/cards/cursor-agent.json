@@ -53,27 +53,34 @@
           "-f"
         ],
         "verified": false,
-        "note": "force/YOLO per the cheat sheet -- confirm against `cursor-agent --help`"
+        "note": "-f / --yolo: bypasses confirmation for shell commands and file writes",
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "sandbox": {
         "args": [
           "-w"
         ],
         "verified": false,
-        "note": "git worktree per the cheat sheet -- confirm against `cursor-agent --help`"
+        "note": "-w / --worktree: isolates work in a disposable git worktree",
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "plan": {
-        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "prompt_prefix": "Create a high-level execution plan first, then carry it out. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
         "prompt_prefix": "Use your repository index to find every affected call site first, then apply the change across all of them in one pass rather than file by file. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "readonly": {
-        "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
-        "verified": true,
-        "note": "advisory only -- cursor-agent's plan mode flag is unconfirmed, so this is an instruction, not a guarantee"
+        "verified": false,
+        "note": "--plan / --mode=plan: read-only planner that analyses without modifying files",
+        "args": [
+          "--mode=plan"
+        ],
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {

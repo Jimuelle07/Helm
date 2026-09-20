@@ -56,21 +56,25 @@
       "unattended": {
         "satisfied_by_base": true,
         "verified": true,
-        "note": "`--yes-always` in the base contract already answers every confirmation"
+        "note": "`--yes-always` in the base contract already answers every confirmation",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "plan": {
         "args": [
-          "--architect"
+          "--architect",
+          "--auto-accept-architect"
         ],
         "verified": true,
-        "note": "architect edit format: reason out the change, then apply it (the flag form of the in-chat /architect command)"
+        "note": "architect edit format -- the flag form of /architect's two-step plan-then-edit loop. --auto-accept-architect is required headless, where nothing can accept the plan",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "readonly": {
         "args": [
           "--dry-run"
         ],
         "verified": true,
-        "note": "runs the edit loop without writing anything to disk"
+        "note": "runs the edit loop without writing anything. /ask is the interactive equivalent but has no confirmed flag form",
+        "source": "--help, verified on this machine 2026-09-20"
       }
     },
     "recovery": {

@@ -63,14 +63,16 @@
           "--approval-mode"
         ],
         "verified": true,
-        "note": "auto-approves every tool, not just edits"
+        "note": "auto-approves every tool, not just edits",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "sandbox": {
         "args": [
           "-s"
         ],
         "verified": true,
-        "note": "runs tools inside Gemini's sandbox; -w for a git worktree instead"
+        "note": "the sheet's /sandbox is the interactive form; -s is the headless flag, confirmed against --help",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "readonly": {
         "args": [
@@ -81,15 +83,18 @@
           "--approval-mode"
         ],
         "verified": true,
-        "note": "plan mode is read-only"
+        "note": "plan mode is read-only",
+        "source": "--help, verified on this machine 2026-09-20"
       },
       "plan": {
-        "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "prompt_prefix": "Think step-by-step. Work out the structure -- which files to create, what each is responsible for, and the interfaces between them -- then implement it. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
-        "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
-        "verified": true
+        "prompt_prefix": "Spawn parallel verification steps across the affected files rather than one serial pass, then reconcile. Task: ",
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {

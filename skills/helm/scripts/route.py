@@ -402,6 +402,11 @@ def compose(verdict: dict, routable: list[dict], intent: str) -> dict:
         caveats.append(
             f"injected flags for {', '.join(plan.unverified)} are unverified "
             "against this CLI's --help")
+    risky = [m for m in plan.advisory if m in dispatch.SAFETY_MODES]
+    if risky:
+        caveats.append(
+            f"{', '.join(risky)} is advisory on {agent_name}, not enforced -- "
+            "the agent is asked, not prevented")
 
     clarify = clarity <= THRESHOLDS["CLARIFY_MAX_SPEC_CLARITY"]
     return {
@@ -417,6 +422,7 @@ def compose(verdict: dict, routable: list[dict], intent: str) -> dict:
             "modes": list(plan.modes),
             "unavailable": list(plan.unmet),
             "unverified": list(plan.unverified),
+            "advisory": list(plan.advisory),
             "notes": list(plan.notes),
         },
         "alternatives": _alternatives(ans, agent_name, by_name),
@@ -584,6 +590,9 @@ def render(route: dict, intent: str) -> str:
             out.append(f"  modes injected: {', '.join(d['modes'])}")
         if d.get("unavailable"):
             out.append(f"  modes this agent cannot express: {', '.join(d['unavailable'])}")
+        risky = [m for m in (d.get("advisory") or []) if m in dispatch.SAFETY_MODES]
+        if risky:
+            out.append(f"  ADVISORY ONLY (asked, not enforced): {', '.join(risky)}")
         for n in d.get("notes") or []:
             out.append(f"    - {n}")
 

@@ -26,9 +26,9 @@ Python has to learn a new flag.
 |---|---|---|
 | `unattended` | Widen permissions past the headless default so it never pauses | Cursor `-f`, Crush `--yolo`, Claude `--permission-mode bypassPermissions` |
 | `sandbox` | Confine the work so a bad result cannot touch the live tree | Claude `-w`, Gemini `-s`, Cursor `-w` |
-| `plan` | Settle the architecture before writing code | Aider `--architect`, Goose `/plan` |
-| `parallel` | Fan out across sub-agents instead of walking files serially | Claude's "Fan out subagents in parallel to …" |
-| `readonly` | Forbid writes outright | Claude/Gemini plan mode, Codex `--sandbox read-only`, Aider `--dry-run` |
+| `plan` | Settle the architecture before writing code | Aider `--architect`, Qwen `--mode plan-act`, Amp's "Consult the Oracle" |
+| `parallel` | Fan out across sub-agents instead of walking files serially | Claude's "Fan out subagents in parallel to …", Amp's "Dispatch subagents", Codex's "Map-reduce repository review" |
+| `readonly` | Forbid writes outright | Claude/Gemini `plan` approval mode, Cursor `--mode=plan`, Goose `/plan`, Codex `--sandbox read-only`, Aider `--dry-run` |
 
 ## The rules
 
@@ -73,6 +73,32 @@ aider is unattended by its base contract and cannot be made to pause, yet blast_
 called for a sandbox it cannot provide -- run it in a worktree yourself, or route elsewhere
 ```
 
+### Enforced vs advisory
+
+A mode is **enforced** when the tool guarantees it — a flag the CLI parses, or a base
+contract that already covers it. It is **advisory** when all we did was ask nicely, which
+includes slash directives: `/plan` is only as reliable as the agent's own handling of it,
+and nothing here can check that.
+
+For `plan` and `parallel` the difference is a quality question. For `readonly` and
+`sandbox` it is a safety question, so those get said out loud:
+
+```
+readonly is ADVISORY on goose -- the agent is instructed, not prevented.
+Do not treat it as containment
+```
+
+The same `review` task, three agents:
+
+| Agent | `readonly` becomes | Enforced? |
+|---|---|---|
+| `gemini` | `--approval-mode plan` | yes — cannot write |
+| `cursor-agent` | `--mode=plan` | yes (flag unverified here) |
+| `goose` | `/plan ` prefix | no — a directive it may ignore |
+| `opencode`, `crush` | "Do not modify …" prefix | no — plain instruction |
+
+Nothing declares this; it is derived from the entry's shape, so no card can get it wrong.
+
 ## Card schema
 
 The mode table lives under `headless.modes`. Each entry says how that mode is achieved:
@@ -102,7 +128,10 @@ The mode table lives under `headless.modes`. Each entry says how that mode is ac
 | `prompt_prefix` | Text prepended to the task. Prefixes apply in `MODE_ORDER`, so the command is reproducible |
 | `satisfied_by_base` | This CLI already guarantees the mode; inject nothing and say so |
 | `verified` | Have these `args` been confirmed against the CLI's own `--help`? |
+| `source` | Where the entry came from — a `--help` reading or the cheat sheet |
 | `note` | Shown to the user in the dispatch notes |
+
+`args` and `satisfied_by_base` make a mode *enforced*; a `prompt_prefix` alone makes it *advisory*. See above.
 
 ### `{flags}`
 
@@ -120,25 +149,64 @@ ignored or an error depending on the parser — neither being a failure worth de
 the field. A named flag's value is taken to be the next token unless that token is itself a
 flag, so dropping a boolean flag does not swallow whatever follows it.
 
-### `verified`
+### `verified` and `source`
 
-Same discipline as `contract_verified`, and just as load-bearing. `true` means the flags in
-`args` were confirmed against that CLI's own `--help`. A wrong flag is not a degraded run,
-it is a dead one.
+Same discipline as `contract_verified`, and just as load-bearing. A wrong flag is not a
+degraded run, it is a dead one.
 
-Confirmed against a live `--help`: **claude, codex, gemini, aider, opencode, copilot**.
+- **`source`** records where the entry came from. Every mode has one.
+- **`verified: true`** is reserved for flags read off that CLI's own `--help` on a machine
+  where it was installed. A test enforces the implication: a mode with `args` may only
+  claim `verified` when its `source` mentions `--help`.
 
-Not confirmed — the remaining seven were not installed on the machine where these cards
-were written: **cursor-agent, crush, goose, droid, amp, qwen, ollama**. Their flag-bearing
-entries are marked `"verified": false` and the planner surfaces that as a caveat:
+| Source | Agents | Trust |
+|---|---|---|
+| `--help`, verified on this machine | claude, codex, gemini, aider, opencode, copilot | flags confirmed against the binary |
+| *CLI Coding Agents Cheat Sheet* | cursor-agent, crush, goose, amp, qwen, droid | documented, not confirmed here |
+
+A cheat sheet is a much better source than a guess — it corrected two cards and fixed a
+real bug, below — but it is not the binary, and this repo has already caught it describing
+flags the installed CLI does not have. Unverified modes surface as a caveat:
 
 ```
-caveat: injected flags for sandbox are unverified against this CLI's --help
+caveat: injected flags for readonly are unverified against this CLI's --help
+note:   readonly: flags not confirmed against this CLI's --help (source: CLI Coding Agents Cheat Sheet)
 ```
 
-Where no flag could be quoted from a source, those cards use a `prompt_prefix` instead.
-That is a deliberate asymmetry: a wrong prompt prefix costs some quality, a wrong flag
-costs the whole run.
+### Where the sheet and the binary disagree
+
+Two, and the installed binary wins both times, because it is the thing that will run.
+
+**Codex.** The sheet lists `--approval-mode <auto|suggest|manual>` and the slash commands
+`/diff`, `/apply`, `/rollback`. The installed `codex exec` has none of them; it has
+`-s/--sandbox <read-only|workspace-write|danger-full-access>` and `--approve-for-me`. The
+card uses `--sandbox`.
+
+**Copilot.** The sheet's section documents `gh copilot suggest` / `gh copilot explain` —
+the old `gh` extension, a shell-command suggester with `-t shell|git|gh`. The installed
+binary is **GitHub Copilot CLI 1.0.83**, a different tool entirely: `-p/--prompt`,
+`--allow-all-tools`, `--mode plan`. The card targets the standalone CLI, which is what
+`bin_names: ["copilot"]` resolves to.
+
+Where a card's situation differs from the sheet like this, it carries a `card_note`.
+
+### The bug the sheet caught
+
+Goose's `/plan` **locks the agent into a read-only architectural phase until `/endplan`**.
+The first draft of these cards used `/plan` for the `plan` mode — architecture-first, then
+build. In a one-shot `goose run` there is no second turn to send `/endplan` from, so every
+scaffold task routed to Goose would have planned, written nothing, and exited clean: a
+guaranteed `no_op`, and one that only the semantic judge would have caught.
+
+`/plan` is therefore mapped to **`readonly`**, where a read-only lock is the entire point.
+Goose's `plan` mode uses a plain architecture-first prefix instead.
+
+This is the general shape of the risk: a directive that is correct interactively can be
+exactly wrong headless, because the turn that would release it never comes. The same
+reasoning applies to Aider's `--architect`, which proposes a plan and then waits for
+acceptance — the card pairs it with `--auto-accept-architect` for exactly this reason — and
+to Gemini's `/reset`, which is pointless headless because `-p` starts a fresh session every
+run anyway.
 
 ## Recovery
 
@@ -203,15 +271,17 @@ full, a bare `signals` block, or a raw Jev verdict — so no caller has to resha
 
 ## Adding modes to a card
 
-1. Run the CLI's `--help` and find the real flags. Do not guess.
+1. Run the CLI's `--help` and find the real flags. Check the cheat sheet too, but when
+   they disagree the binary wins — see "Where the sheet and the binary disagree".
 2. Add a `{flags}` token to `argv` at the position option flags belong.
-3. Add the mode entries, setting `verified` honestly.
+3. Add the mode entries. Set `source` always, and `verified` only for flags you read off
+   `--help` yourself.
 4. If a mode must swap out a base flag, list it in `replaces`.
 5. Add `recovery` entries for `no_op` / `stuck` / `failed`. Only reference modes the card
    actually declares — a test enforces this.
 6. `python -m unittest discover -s tests`. The card tests catch unknown mode names, a
    missing `{flags}` slot, a mode that does nothing, and recovery referencing a mode that
-   is not there.
+   is not there, a mode with no `source`, and a `verified` flag that no `--help` backs.
 7. `python scripts/probe.py --refresh`. The registry cache is schema-versioned, so a card
    edit takes effect on the next call — but a card *shape* change needs the bump in
    `probe.REGISTRY_SCHEMA`.

@@ -52,20 +52,24 @@
       "unattended": {
         "satisfied_by_base": true,
         "verified": false,
-        "note": "`droid exec` is non-interactive; no separate approval flag confirmed"
+        "note": "`droid exec` is the non-interactive form; the cheat sheet lists no separate approval flag",
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "plan": {
         "prompt_prefix": "Before writing any code, work out the structure: which files to create, what each is responsible for, and the interfaces between them. State that plan, then implement it. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "parallel": {
         "prompt_prefix": "This change spans many files. Work through them in independent batches rather than one long serial pass, and keep a checklist of what is done. Task: ",
-        "verified": true
+        "verified": true,
+        "source": "CLI Coding Agents Cheat Sheet"
       },
       "readonly": {
         "prompt_prefix": "Do not modify, create, or delete any file. Read, analyse, and report your findings only. Task: ",
         "verified": true,
-        "note": "advisory only -- no read-only flag confirmed"
+        "note": "advisory only -- no read-only flag confirmed",
+        "source": "CLI Coding Agents Cheat Sheet"
       }
     },
     "recovery": {
@@ -89,5 +93,6 @@
       }
     }
   },
-  "contract_verified": false
+  "contract_verified": false,
+  "card_note": "droid ingests external context with @jira:<key> and @notion:<doc>, which can be embedded directly in a task string."
 }

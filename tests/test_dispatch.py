@@ -252,6 +252,87 @@ class TestRendering(unittest.TestCase):
 # Signals parsing
 # =========================================================================== #
 
+class TestEnforcedVsAdvisory(unittest.TestCase):
+    """"Do not write any files", which the model may ignore, is not the same
+    guarantee as a flag that makes writing impossible. A caller reading
+    `modes: readonly` is entitled to know which one they got."""
+
+    def test_a_flag_is_enforcement(self):
+        self.assertTrue(D.is_enforced({"args": ["--dry-run"]}))
+
+    def test_a_base_contract_guarantee_is_enforcement(self):
+        self.assertTrue(D.is_enforced({"satisfied_by_base": True}))
+
+    def test_a_prompt_prefix_is_only_advice(self):
+        # Including a slash directive: it is only as reliable as the agent's
+        # own handling of it, which nothing here can check.
+        self.assertFalse(D.is_enforced({"prompt_prefix": "/plan "}))
+
+    def test_an_advisory_readonly_is_called_out(self):
+        c = card(modes={"readonly": {"prompt_prefix": "Do not write. ",
+                                     "verified": True, "source": "sheet"}})
+        p = D.plan(c, "t", {"task_kind": "review"})
+        self.assertIn("readonly", p.modes)
+        self.assertIn("readonly", p.advisory)
+        self.assertTrue(any("ADVISORY" in n for n in p.notes))
+
+    def test_an_enforced_readonly_is_not_flagged(self):
+        c = card(modes={"readonly": {"args": ["--dry-run"], "verified": True,
+                                     "source": "--help"}})
+        p = D.plan(c, "t", {"task_kind": "review"})
+        self.assertEqual(p.advisory, ())
+        self.assertFalse(any("ADVISORY" in n for n in p.notes))
+
+    def test_advisory_only_lists_modes_that_were_actually_applied(self):
+        # A mode withheld by the sandbox interaction must not still be
+        # reported as something the run is relying on.
+        modes = {"unattended": {"prompt_prefix": "Go wild. ", "verified": True,
+                                "source": "sheet"}}
+        p = D.plan(card(modes=modes), "t", {"needs_human": 0.05, "blast_radius": 3.0})
+        self.assertNotIn("unattended", p.modes)
+        self.assertNotIn("unattended", p.advisory)
+
+    def test_a_quality_mode_being_advisory_is_not_shouted_about(self):
+        # parallel and plan are advice by nature; only the safety modes get
+        # the loud note, or the signal stops meaning anything.
+        c = card(modes={"parallel": {"prompt_prefix": "Fan out. ", "verified": True,
+                                     "source": "sheet"}})
+        p = D.plan(c, "t", {"task_kind": "refactor", "context_breadth": 3.0})
+        self.assertIn("parallel", p.advisory)
+        self.assertFalse(any("ADVISORY" in n for n in p.notes))
+
+
+class TestGoosePlanIsReadOnly(unittest.TestCase):
+    """Regression for the bug the cheat sheet caught.
+
+    Goose's /plan locks the agent into a read-only phase until /endplan. A
+    one-shot `goose run` never gets a second turn to send /endplan from, so
+    using /plan for plan-then-build would make every scaffold task a
+    guaranteed no_op.
+    """
+
+    def setUp(self):
+        self.goose = CARDS["goose"]
+
+    def test_scaffold_does_not_get_the_plan_directive(self):
+        p = D.plan(self.goose, "build a service", {"task_kind": "scaffold"})
+        self.assertIn("plan", p.modes)
+        self.assertNotIn("/plan", p.prompt)
+
+    def test_review_does_get_the_plan_directive(self):
+        p = D.plan(self.goose, "review this", {"task_kind": "review"})
+        self.assertIn("readonly", p.modes)
+        self.assertTrue(p.prompt.startswith("/plan "))
+
+    def test_no_card_uses_a_locking_directive_for_the_plan_mode(self):
+        # The general trap: a directive that is correct interactively can be
+        # exactly wrong headless, because the turn that releases it never comes.
+        for name, c in CARDS.items():
+            spec = D.card_modes(c).get("plan") or {}
+            with self.subTest(agent=name):
+                self.assertNotIn("/plan", spec.get("prompt_prefix", ""))
+
+
 class TestSignals(unittest.TestCase):
     def test_reads_a_flat_signals_block(self):
         s = D.Signals.from_dict({"task_kind": "refactor", "blast_radius": 2.5})
@@ -385,6 +466,25 @@ class TestCardModeTables(unittest.TestCase):
                         "the base contract already covers it")
                     self.assertIn("verified", spec)
                     self.assertIsInstance(spec["verified"], bool)
+
+    def test_every_mode_records_where_it_came_from(self):
+        for name, c in CARDS.items():
+            for mode, spec in D.card_modes(c).items():
+                with self.subTest(agent=name, mode=mode):
+                    self.assertTrue(spec.get("source"),
+                                    "a mode must say whether its flags came from "
+                                    "the CLI's --help or from the cheat sheet")
+
+    def test_verified_flags_were_read_off_the_cli_not_a_document(self):
+        # The invariant that keeps `verified` meaning one thing. A published
+        # cheat sheet is a better source than a guess -- it corrected two of
+        # these cards -- but it is not the binary, and this repo has already
+        # caught the sheet describing a flag the installed CLI does not have.
+        for name, c in CARDS.items():
+            for mode, spec in D.card_modes(c).items():
+                if spec.get("args") and spec.get("verified"):
+                    with self.subTest(agent=name, mode=mode):
+                        self.assertIn("--help", str(spec.get("source", "")))
 
     def test_cards_with_flag_modes_have_a_flags_slot(self):
         for name, c in CARDS.items():
