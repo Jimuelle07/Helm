@@ -41,8 +41,17 @@ python skills/agent-router/scripts/route.py "add retry logic to the payment clie
 python -m unittest discover -s tests
 ```
 
-Set `TYPESAFE_API_KEY` to enable Jev. Without it, routing falls back to a deterministic scorer
-whose confidence is capped at 0.5 — a degraded judge may suggest, never act unattended.
+Every user configures their own Jev access — the key is never bundled with the skill:
+
+```bash
+python skills/agent-router/scripts/route.py --set-api-key sk-...   # once, per user
+python skills/agent-router/scripts/route.py --clear-api-key        # to remove it
+```
+
+Stored locally at `~/.cache/agent-router/credentials.json` (a `TYPESAFE_API_KEY` env var
+always takes precedence if set). Without a key, routing falls back to a deterministic
+scorer whose confidence is capped at 0.5 — a degraded judge may suggest, never act
+unattended.
 
 ## Layout
 

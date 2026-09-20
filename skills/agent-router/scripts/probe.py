@@ -36,6 +36,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent))
+import keystore  # noqa: E402
+
 CARDS_DIR = Path(__file__).parent / "cards"
 CACHE_PATH = Path(
     os.environ.get("AGENT_ROUTER_CACHE")
@@ -417,10 +420,18 @@ def build_registry(repo_root: Path | None = None, want_version: bool = True) -> 
         "local_inference": local,
         "agents": agents,
         "repo": probe_repo(repo_root) if repo_root else None,
-        "jev": {
-            "api_key_present": bool(os.environ.get("TYPESAFE_API_KEY")),
-            "sdk_installed": _sdk_installed(),
-        },
+        "jev": probe_jev(),
+    }
+
+
+def probe_jev() -> dict:
+    """Never cached: a key set with --set-api-key must take effect immediately,
+    not after the 24h registry cache expires. Cheap to recompute either way."""
+    key = keystore.get_api_key()
+    return {
+        "api_key_present": bool(key),
+        "api_key_source": keystore.key_source(),  # "env" | "stored" | None
+        "sdk_installed": _sdk_installed(),
     }
 
 
@@ -441,6 +452,9 @@ def load_cached(refresh: bool, repo_root: Path | None, want_version: bool) -> di
                     reg["cache_age_seconds"] = int(age)
                     # Free RAM is a point-in-time reading, never a cached capability.
                     reg["hardware"]["ram_available_gb"] = probe_memory()["available_gb"]
+                    # Same reasoning for the API key: --set-api-key must take effect
+                    # on the very next call, not after the cache expires.
+                    reg["jev"] = probe_jev()
                     if repo_root:
                         reg["repo"] = probe_repo(repo_root)
                     return reg
@@ -512,10 +526,12 @@ def summarize(reg: dict) -> str:
     lines.append("")
     lines.append("DECISION LAYER")
     if jev["api_key_present"]:
-        lines.append("  Jev: TYPESAFE_API_KEY present -- judgement available")
+        src = "TYPESAFE_API_KEY env var" if jev["api_key_source"] == "env" else "locally stored key"
+        lines.append(f"  Jev: API key found ({src}) -- judgement available")
     else:
-        lines.append("  Jev: no TYPESAFE_API_KEY -- route.py will use the deterministic")
+        lines.append("  Jev: no API key configured -- route.py will use the deterministic")
         lines.append("       fallback scorer and cap its confidence at 0.5 (recommend-only)")
+        lines.append("       Set one with:  python probe.py --set-api-key sk-...")
 
     if reg.get("repo"):
         r = reg["repo"]
@@ -538,7 +554,12 @@ def main() -> int:
     ap.add_argument("--repo", metavar="PATH", help="also summarise this repository")
     ap.add_argument("--no-version", action="store_true",
                     help="skip --version probes (much faster)")
+    keystore.add_key_args(ap)
     args = ap.parse_args()
+
+    key_result = keystore.handle_key_args(args)
+    if key_result is not None:
+        return key_result
 
     repo_root = Path(args.repo).resolve() if args.repo else None
     reg = load_cached(args.refresh, repo_root, not args.no_version)

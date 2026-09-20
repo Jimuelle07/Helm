@@ -39,6 +39,31 @@ installed agents, so recommending something that is not on the machine is **stru
 impossible**, not merely unlikely. That is the whole reason to use a typed decision model
 here instead of asking an LLM to please only suggest installed tools.
 
+## Setting up Jev (once per user)
+
+This skill is shared across a team, so the Jev API key is never bundled with it — each
+person authenticates with their own TypeSafe account, the same way they would with `gh
+auth login` or a database credential. `probe.py` reports whether a key is currently
+configured and, if not, tells you the exact command to fix it.
+
+If the user wants live Jev judgement and `probe.py` reports no key configured, ask them
+for their TypeSafe API key (from `docs.typesafe.ai` / their TypeSafe account) and run:
+
+```bash
+python scripts/route.py --set-api-key sk-...
+```
+
+This stores the key locally at `~/.cache/agent-router/credentials.json` (owner-only
+permissions on POSIX) and it is picked up on every future call — nothing else to
+configure. `--clear-api-key` removes it. A `TYPESAFE_API_KEY` environment variable, if
+set, always takes precedence over the stored key, which is useful for CI or a temporary
+override without disturbing what is stored.
+
+**Never print, log, or echo the key itself** — confirmation messages only ever show a
+masked form (`sk-ab...cd12`). Without a key, everything still works: routing falls back to
+a deterministic scorer whose confidence is hard-capped at 0.5, so it can recommend but
+never auto-execute. Tell the user this plainly rather than silently degrading.
+
 ## The workflow
 
 All paths are relative to this skill's directory. Run steps 1 and 2 in order; step 3 is
@@ -92,10 +117,10 @@ Always tell the user **which brain judged it**. The `source` field is either `je
 
 ## When Jev is unavailable
 
-If `TYPESAFE_API_KEY` is unset or the API is unreachable, `route.py` falls back to a
-deterministic scorer over the same capability cards. This is a real, supported path, not
-an error state — but its confidence is hard-capped at 0.5, which by design means a
-fallback verdict can never reach `auto` mode.
+If no API key is configured (see setup above) or the API is unreachable, `route.py` falls
+back to a deterministic scorer over the same capability cards. This is a real, supported
+path, not an error state — but its confidence is hard-capped at 0.5, which by design means
+a fallback verdict can never reach `auto` mode.
 
 The reasoning: a degraded judge is allowed to *suggest*, never to *act unattended*. When
 you report a fallback result, say that Jev was unavailable and that the recommendation is

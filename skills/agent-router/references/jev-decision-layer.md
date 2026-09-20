@@ -79,10 +79,15 @@ that widens the answer space.
 | Item | Value |
 |---|---|
 | Endpoint | `POST https://api.typesafe.ai/v1/systemone` |
-| Auth | `TYPESAFE_API_KEY` (`sk-...`) |
+| Auth | a per-user key (`sk-...`), resolved by `keystore.py` |
 | Python SDK | `pip install typesafe-sdk` |
 | JS/TS SDK | `npm install @typesafe-ai/sdk` |
 | Model | pin `jev-1.13.0`, **not** `jev-latest` |
+
+**Where the key comes from.** `keystore.get_api_key()` checks `TYPESAFE_API_KEY` in the
+environment first, then a key stored locally via `route.py --set-api-key`. Every user of
+this skill has their own TypeSafe account, so the key is never hardcoded or bundled — see
+`SKILL.md`'s "Setting up Jev" section for the exact flow to walk a new user through.
 
 ```python
 from typesafe_sdk import Choice, Noul, Score, TypeSafeClient

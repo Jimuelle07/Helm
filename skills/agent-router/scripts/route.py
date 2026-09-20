@@ -31,6 +31,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import keystore  # noqa: E402
 import probe  # noqa: E402
 
 JEV_ENDPOINT = os.environ.get("TYPESAFE_ENDPOINT", "https://api.typesafe.ai/v1/systemone")
@@ -188,18 +189,24 @@ def _encode_question(q: dict) -> dict:
 
     NOTE: inferred from the documented SDK surface (Choice/Score/Noul with
     `instructions` plus `criteria`), not verified against a live endpoint --
-    this machine has no TYPESAFE_API_KEY. If the raw-HTTP path 400s, check the
-    current schema at docs.typesafe.ai and fix it here; the SDK path below is
-    authoritative and unaffected. Any failure falls through to the deterministic
-    scorer, so a wrong guess degrades the answer rather than breaking the tool.
+    this project has no configured API key to test against. If the raw-HTTP
+    path 400s, check the current schema at docs.typesafe.ai and fix it here;
+    the SDK path below is authoritative and unaffected. Any failure falls
+    through to the deterministic scorer, so a wrong guess degrades the answer
+    rather than breaking the tool.
     """
     return {k: v for k, v in q.items() if v is not None}
 
 
 def ask_jev(state: dict, questions: dict) -> dict:
-    api_key = os.environ.get("TYPESAFE_API_KEY")
+    # keystore resolves TYPESAFE_API_KEY env var first, then the locally stored
+    # key from `--set-api-key` -- see keystore.py for the full precedence.
+    api_key = keystore.get_api_key()
     if not api_key:
-        raise JevUnavailable("TYPESAFE_API_KEY is not set")
+        raise JevUnavailable(
+            "no TypeSafe API key configured. Run "
+            "`python route.py --set-api-key sk-...` once, or set TYPESAFE_API_KEY."
+        )
 
     # Prefer the official SDK when it is installed: it owns the wire format.
     try:
@@ -213,6 +220,13 @@ def ask_jev(state: dict, questions: dict) -> dict:
                 built[key] = Score(instructions=q["instructions"], criteria=q["criteria"])
             else:
                 built[key] = Noul(instructions=q["instructions"])
+        # The documented SDK usage (context.md) constructs TypeSafeClient() with
+        # no arguments, implying it reads TYPESAFE_API_KEY from the environment.
+        # A key entered via --set-api-key lives only in our local credential
+        # file, not the environment, so export it for this process before the
+        # client reads it. This process exits right after this call either way,
+        # so nothing leaks back to the invoking shell.
+        os.environ.setdefault("TYPESAFE_API_KEY", api_key)
         client = TypeSafeClient()
         resp = client.system_one(state=state, questions=built, model=JEV_MODEL)
         return json.loads(resp.model_dump_json()) if hasattr(resp, "model_dump_json") else dict(resp)
@@ -619,13 +633,20 @@ def render(route: dict, intent: str) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Route a task to the best available agent.")
-    ap.add_argument("intent", help="what the user wants to build")
+    ap.add_argument("intent", nargs="?", help="what the user wants to build")
     ap.add_argument("--repo", default=".", help="repository root for context (default: cwd)")
     ap.add_argument("--json", action="store_true", help="emit the full decision as JSON")
     ap.add_argument("--execute", action="store_true", help="run the agent if all gates pass")
     ap.add_argument("--refresh", action="store_true", help="re-probe instead of using the cache")
     ap.add_argument("--no-trace", action="store_true", help="do not append to the trace log")
+    keystore.add_key_args(ap)
     args = ap.parse_args()
+
+    key_result = keystore.handle_key_args(args)
+    if key_result is not None:
+        return key_result
+    if args.intent is None:
+        ap.error("intent is required unless --set-api-key or --clear-api-key is given")
 
     repo_root = Path(args.repo).resolve()
     reg = probe.load_cached(args.refresh, repo_root, want_version=True)

@@ -285,3 +285,11 @@ Three things the plan got wrong, corrected in code and worth carrying forward:
   containing shell metacharacters is the BatBadBut class of bug (CVE-2024-24576). The
   executor refuses rather than attempting to quote, since `cmd.exe` quoting is genuinely
   hard to get right and the user can always run the printed command themselves.
+- **The Jev key can't be a machine-level setting once this is a shared skill.** The original
+  plan treated `TYPESAFE_API_KEY` as an environment variable the harness reads — fine for
+  one developer's machine, wrong for a skill teammates install independently. Each person
+  has their own TypeSafe account, so `keystore.py` resolves the key from the environment
+  first, then a locally stored per-user file written by `route.py --set-api-key`, at the
+  same trust boundary as `~/.netrc`. Setting a key must also take effect immediately rather
+  than waiting out the 24h registry cache — `probe_jev()` is deliberately excluded from what
+  `load_cached()` caches, for the same reason free RAM already was.
