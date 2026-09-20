@@ -753,7 +753,12 @@ def summarize(reg: dict) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Probe machine + installed coding agents.")
+    ap = argparse.ArgumentParser(
+        description="Probe machine + installed coding agents.",
+        # Exact flags only. argparse abbreviates by default, which made the
+        # destructive `--clear-api-key` reachable as `--clear` -- a typo away
+        # from silently deleting the user's credentials.
+        allow_abbrev=False)
     ap.add_argument("--json", action="store_true", help="emit the registry as JSON")
     ap.add_argument("--refresh", action="store_true", help="bypass the cache")
     ap.add_argument("--repo", metavar="PATH", help="also summarise this repository")

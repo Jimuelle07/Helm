@@ -44,10 +44,13 @@
     "argv": [
       "codex",
       "exec",
+      "--sandbox",
+      "workspace-write",
       "{prompt}"
     ],
     "model_flag": "--model",
-    "cwd_aware": true
+    "cwd_aware": true,
+    "write_enabled": true
   },
   "contract_verified": true,
   "auth_check": {

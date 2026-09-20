@@ -165,6 +165,35 @@ class TestFilePermissions(KeystoreTestCase):
         mode = stat.S_IMODE(keystore.CREDENTIALS_PATH.stat().st_mode)
         self.assertEqual(mode, 0o600)
 
+class TestDestructiveFlagIsNotAbbreviable(KeystoreTestCase):
+    """Regression: argparse abbreviates long options by default, which made
+    `--clear-api-key` reachable as `--clear` -- one typo away from silently
+    deleting a user's credentials. Every parser that exposes the flag must
+    disable abbreviation."""
+
+    def _parser_sources(self):
+        import re
+        for name in ("probe.py", "route.py", "supervise.py"):
+            yield name, (SCRIPTS / name).read_text(encoding="utf-8")
+
+    def test_every_cli_disables_argparse_abbreviation(self):
+        for name, src in self._parser_sources():
+            with self.subTest(script=name):
+                self.assertIn("allow_abbrev=False", src,
+                              f"{name} must pass allow_abbrev=False to ArgumentParser")
+
+    def test_abbreviated_clear_flag_is_rejected(self):
+        import argparse
+        ap = argparse.ArgumentParser(allow_abbrev=False)
+        keystore.add_key_args(ap)
+        with self.assertRaises(SystemExit):
+            ap.parse_args(["--clear"])
+
+    def test_exact_clear_flag_still_parses(self):
+        import argparse
+        ap = argparse.ArgumentParser(allow_abbrev=False)
+        keystore.add_key_args(ap)
+        self.assertTrue(ap.parse_args(["--clear-api-key"]).clear_api_key)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

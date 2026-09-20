@@ -104,6 +104,7 @@ tool in isolation. See `references/capability-cards.md`.
 
 | File | What's in it |
 |---|---|
+| **`references/walkthrough.md`** | **Start here** — install to end-to-end, with real output |
 | `SKILL.md` | The workflow, and how to present results |
 | `references/capability-cards.md` | Card schema; writing a competence line that routes well |
 | `references/jev-decision-layer.md` | Every question asked, and why each one is independent |

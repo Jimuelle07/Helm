@@ -72,6 +72,7 @@ unattended.
 
 ## Docs
 
+- [`skills/agent-router/references/walkthrough.md`](skills/agent-router/references/walkthrough.md) — **start here**: install to end-to-end with real output
 - [`docs/idea.md`](docs/idea.md) — the thesis: the problem, the bet, why Jev is the right shape
 - [`docs/system-design.md`](docs/system-design.md) — the build spec: layers, questions, thresholds
 - [`docs/context.md`](docs/context.md) — research notes on what Jev is and is not

@@ -557,7 +557,9 @@ def render(route: dict, intent: str) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Route a task to the best available agent.")
+    ap = argparse.ArgumentParser(
+        description="Route a task to the best available agent.",
+        allow_abbrev=False)  # see probe.py: abbreviation made --clear-api-key a typo away
     ap.add_argument("intent", nargs="?", help="what the user wants to build")
     ap.add_argument("--repo", default=".", help="repository root for context (default: cwd)")
     ap.add_argument("--json", action="store_true", help="emit the full decision as JSON")

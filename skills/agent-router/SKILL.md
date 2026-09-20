@@ -226,6 +226,8 @@ that discriminates well.
 
 Load these only when the task calls for them:
 
+- `references/walkthrough.md` — full install-to-end-to-end example with real output; read this
+  first if you are unsure how the pieces fit together
 - `references/capability-cards.md` — card schema, writing good competence lines, adding an agent
 - `references/jev-decision-layer.md` — the question set, why each question exists, Jev API details
 - `references/calibration.md` — the thresholds, why they are currently guesses, and how to fit them

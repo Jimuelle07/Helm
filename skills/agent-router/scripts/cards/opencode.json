@@ -45,10 +45,12 @@
     "argv": [
       "opencode",
       "run",
+      "--auto",
       "{prompt}"
     ],
     "model_flag": "--model",
-    "cwd_aware": true
+    "cwd_aware": true,
+    "write_enabled": true
   },
   "list_models": [
     "opencode",

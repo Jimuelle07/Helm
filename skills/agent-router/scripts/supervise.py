@@ -581,7 +581,8 @@ def render(v: dict) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Dispatch a task to an agent and let Jev judge completion.")
+        description="Dispatch a task to an agent and let Jev judge completion.",
+        allow_abbrev=False)
     ap.add_argument("agent", help="agent name, e.g. codex (see probe.py)")
     ap.add_argument("task", help="the task to hand to that agent")
     ap.add_argument("--repo", default=".", help="working directory (default: cwd)")
