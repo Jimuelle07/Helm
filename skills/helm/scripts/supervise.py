@@ -195,6 +195,31 @@ def unsafe_on_windows(resolved: str | None, args: list[str]) -> bool:
     return bool(re.search(r'[&|<>^"%!]', " ".join(args)))
 
 
+def _is_windows_batch_shim(resolved: str | None) -> bool:
+    return (os.name == "nt" and bool(resolved)
+            and Path(resolved).suffix.lower() in {".cmd", ".bat"})
+
+
+def collapse_newlines_for_windows_shim(resolved: str | None,
+                                       argv: list[str]) -> list[str]:
+    """Flatten embedded newlines before an argv reaches a .cmd/.bat shim.
+
+    The same re-parse through cmd.exe that makes metacharacters an injection
+    vector also mangles a merely *multi-line* prompt: cmd.exe treats CR/LF
+    inside the re-parsed string as a line terminator, so everything after the
+    first line is silently lost or run as a second command. The agent then
+    receives a truncated task, does something plausible-looking with it, and
+    Jev -- correctly reading a transcript of an agent that solved a different,
+    smaller problem than the one it was given -- reports a false `no_op` or
+    `stuck`. Collapsing to spaces keeps every word intact; a shim that runs
+    everything through a single re-parsed line was never going to preserve
+    literal newlines anyway, so nothing meaningful is lost that the CLI would
+    have honoured."""
+    if not _is_windows_batch_shim(resolved):
+        return argv
+    return [re.sub(r"\r\n|\r|\n", " ", a) for a in argv]
+
+
 def excerpt(text: str, head: int = EXCERPT_HEAD_CHARS, tail: int = EXCERPT_TAIL_CHARS) -> str:
     """Head + tail, because a transcript's meaning lives at both ends and the
     middle is build spam. Strips ANSI first: colour codes are pure token waste
@@ -513,6 +538,7 @@ def _dispatch_once(card: dict, agent_name: str, task: str,
     argv = list(plan.argv)
     if card.get("path"):
         argv[0] = card["path"]
+    argv = collapse_newlines_for_windows_shim(card.get("path"), argv)
     if unsafe_on_windows(card.get("path"), argv[1:]):
         return _error(agent_name,
                       "refusing to execute: the prompt contains shell metacharacters "

@@ -205,6 +205,47 @@ class TestWindowsInjectionGuard(unittest.TestCase):
             self.assertFalse(S.unsafe_on_windows("/usr/bin/codex", ["fix & del *"]))
 
 
+class TestWindowsNewlineCollapse(unittest.TestCase):
+    """A multi-line prompt re-parsed by cmd.exe through a .cmd/.bat shim gets
+    truncated at the first line break -- the agent receives a partial task,
+    and Jev correctly reports that partial task as a no_op or a stuck run.
+    Collapsing newlines before the shim ever sees them is the fix."""
+
+    def test_a_multiline_prompt_is_collapsed_for_a_cmd_shim(self):
+        with mock.patch.object(S.os, "name", "nt"):
+            argv = S.collapse_newlines_for_windows_shim(
+                "C:\\x\\opencode.cmd", ["opencode", "run", "line one\nline two"])
+        self.assertEqual(argv, ["opencode", "run", "line one line two"])
+
+    def test_crlf_is_also_collapsed(self):
+        with mock.patch.object(S.os, "name", "nt"):
+            argv = S.collapse_newlines_for_windows_shim(
+                "C:\\x\\opencode.CMD", ["opencode", "a\r\nb"])
+        self.assertEqual(argv, ["opencode", "a b"])
+
+    def test_a_single_line_prompt_is_left_untouched(self):
+        with mock.patch.object(S.os, "name", "nt"):
+            argv = S.collapse_newlines_for_windows_shim(
+                "C:\\x\\opencode.cmd", ["opencode", "fix the parser"])
+        self.assertEqual(argv, ["opencode", "fix the parser"])
+
+    def test_exe_targets_are_not_affected(self):
+        with mock.patch.object(S.os, "name", "nt"):
+            argv = S.collapse_newlines_for_windows_shim(
+                "C:\\x\\codex.EXE", ["codex", "line one\nline two"])
+        self.assertEqual(argv, ["codex", "line one\nline two"])
+
+    def test_posix_is_never_affected(self):
+        with mock.patch.object(S.os, "name", "posix"):
+            argv = S.collapse_newlines_for_windows_shim(
+                "/usr/bin/opencode", ["opencode", "line one\nline two"])
+        self.assertEqual(argv, ["opencode", "line one\nline two"])
+
+    def test_no_resolved_path_is_a_no_op(self):
+        argv = S.collapse_newlines_for_windows_shim(None, ["opencode", "a\nb"])
+        self.assertEqual(argv, ["opencode", "a\nb"])
+
+
 class TestRealDispatch(unittest.TestCase):
     """Actually spawn processes, to prove the Run plumbing works."""
 

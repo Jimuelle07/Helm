@@ -304,6 +304,16 @@ Three things the plan got wrong, corrected in code and worth carrying forward:
   containing shell metacharacters is the BatBadBut class of bug (CVE-2024-24576). The
   executor refuses rather than attempting to quote, since `cmd.exe` quoting is genuinely
   hard to get right and the user can always run the printed command themselves.
+- **The same re-parse also mangles a merely multi-line prompt.** This one is not an
+  injection risk, just silent corruption: cmd.exe treats an embedded CR/LF as a line
+  terminator, so a multi-line task gets truncated at the first line, the agent acts on a
+  partial prompt, and Jev — reading a transcript of it solving a different, smaller problem —
+  reports a correct-looking but false `no_op` or `stuck`. Unlike the metacharacter case,
+  there is no ambiguity to refuse over: collapsing the newlines to spaces before the argv
+  reaches a `.cmd`/`.bat` shim loses nothing the shim would have honoured anyway, since it was
+  going to re-flatten the string into one re-parsed line regardless. `supervise.py`'s
+  `collapse_newlines_for_windows_shim` does this immediately before the injection check, so
+  the two guards compose rather than duplicate the shim-detection logic.
 - **"Installed" was never the right precondition; "authenticated" is.** The original L1 design
   treated discovery as the whole job, but a CLI that was downloaded and never logged in passes
   every check the probe made and then fails on its first model call. The fix is a third state
