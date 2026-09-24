@@ -147,11 +147,13 @@ def ask(state: dict, questions: dict) -> dict:
         os.environ.setdefault("TYPESAFE_API_KEY", api_key)
         client = TypeSafeClient()
         resp = client.system_one(state=state, questions=built, model=MODEL)
-        return json.loads(resp.model_dump_json()) if hasattr(resp, "model_dump_json") else dict(resp)
+        got = json.loads(resp.model_dump_json()) if hasattr(resp, "model_dump_json") else dict(resp)
     except ImportError:
         pass
     except Exception as exc:  # SDK present but the call failed
         raise JevUnavailable(f"SDK call failed: {exc}") from exc
+    else:
+        return _require_answers(got, questions)
 
     payload = json.dumps({
         "model": MODEL,
@@ -167,7 +169,7 @@ def ask(state: dict, questions: dict) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            got = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         # HTTPError is file-like; closing it keeps the connection from being
         # reclaimed noisily by the GC on the error path.
@@ -176,6 +178,24 @@ def ask(state: dict, questions: dict) -> dict:
         raise JevUnavailable(f"HTTP {exc.code}: {body}") from exc
     except Exception as exc:
         raise JevUnavailable(str(exc)) from exc
+    return _require_answers(got, questions)
+
+
+def _require_answers(resp, questions: dict) -> dict:
+    """A 200 that does not answer every question is Jev failing, not deciding.
+
+    Callers default a missing answer to a midpoint, which is right for one
+    field's quirk and wrong for a whole response: `{"answers": {}}` would come
+    out as a confident-looking "escalate, judged by jev" built entirely from
+    those defaults. Raising here keeps it on the same exit-4 path as a 500.
+    """
+    answers = resp.get("answers") if isinstance(resp, dict) else None
+    if not isinstance(answers, dict):
+        raise JevUnavailable("response carried no answers")
+    missing = sorted(k for k in questions if not isinstance(answers.get(k), dict))
+    if missing:
+        raise JevUnavailable(f"response did not answer: {', '.join(missing)}")
+    return resp
 
 
 def check() -> dict:
