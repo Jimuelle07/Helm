@@ -43,6 +43,23 @@ def compose(v, rc=0, elapsed=10.0, timed_out=False, output="did the thing proper
     return S.compose(v, rc, elapsed, timed_out, "codex", LOG, output)
 
 
+def offline(case: unittest.TestCase) -> None:
+    """Make a test independent of the developer's key, and unable to bill it.
+
+    supervise() refuses to start without a key, so tests that exercise what
+    happens *after* that check supply a dummy one. The judge is stubbed too:
+    with a real key configured, a dummy env var would not stop a real request,
+    and a plain `unittest discover` must never cost anyone money -- that is
+    what test_jev_live.py and HELM_LIVE=1 are for.
+    """
+    env = mock.patch.dict(os.environ, {"TYPESAFE_API_KEY": "apikey_test_notreal"})
+    env.start()
+    case.addCleanup(env.stop)
+    judge = mock.patch.object(S, "judge", return_value=verdict())
+    case.judge = judge.start()
+    case.addCleanup(judge.stop)
+
+
 class TestExitCodeIsNotEnough(unittest.TestCase):
     """Every case here exits 0. They must not all look the same."""
 
@@ -153,6 +170,15 @@ class TestExcerpt(unittest.TestCase):
 
 
 class TestPreconditions(unittest.TestCase):
+    def setUp(self):
+        # Without a key, supervise() stops at the key check and never reaches
+        # the preconditions these tests are about.
+        offline(self)
+
+    def tearDown(self):
+        # A precondition failure must be caught before anything is judged.
+        self.judge.assert_not_called()
+
     def _reg(self, **over):
         card = {"name": "codex", "installed": True, "path": "/usr/bin/codex",
                 "headless": {"argv": ["codex", "exec", "{prompt}"]},
@@ -247,7 +273,14 @@ class TestWindowsNewlineCollapse(unittest.TestCase):
 
 
 class TestRealDispatch(unittest.TestCase):
-    """Actually spawn processes, to prove the Run plumbing works."""
+    """Actually spawn processes, to prove the Run plumbing works.
+
+    The processes are real; the judge is not. What is under test here is
+    spawning, capture and the kill, none of which needs Jev's opinion.
+    """
+
+    def setUp(self):
+        offline(self)
 
     def _reg(self, code):
         return {"agents": [{
