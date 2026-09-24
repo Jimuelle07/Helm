@@ -93,13 +93,20 @@ costly to spend on it for every task.
 
 > **The probe observes. Jev judges. The chosen agent generates.**
 
-```text
-  your task
-      │
-      ▼
-  ┌─────────┐   what's installed,     ┌─────────┐   which agent, how    ┌──────────────┐
-  │  probe  │ ─ logged in, hardware ─▶│   Jev   │ ─ risky, is it done ─▶│ coding agent │
-  └─────────┘   (no model calls)      └─────────┘   (~$0.0001 each)     └──────────────┘
+```mermaid
+flowchart LR
+    Task(["your task"]) --> Probe
+
+    Probe["probe"]
+    Jev{"Jev"}
+    Agent["coding agent"]
+
+    Probe -- "what's installed,<br>logged in, hardware<br>(no model calls)" --> Jev
+    Jev -- "which agent, how<br>risky, is it done<br>(~$0.0001 each)" --> Agent
+
+    click Probe "#1-probe-observe-without-calling-a-model" "Read about how Probe works"
+    click Jev "#2-judge-seven-questions-in-one-typed-request" "Read about how Jev routes the task"
+    click Agent "#3-dispatch-build-the-command-from-the-signals" "Read about how the agent is dispatched"
 ```
 
 | Script | Job | Role |
