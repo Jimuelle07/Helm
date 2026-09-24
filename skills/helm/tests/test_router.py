@@ -218,6 +218,79 @@ class TestRouteCliFailsFast(unittest.TestCase):
         self.assertNotIn("ROUTE", err)
 
 
+class TestAnswerlessResponseIsAnOutage(unittest.TestCase):
+    """A 200 that answers nothing must not be dressed up as a Jev decision.
+
+    Every field in compose() has a midpoint default, so `{"answers": {}}`
+    used to come out as "ESCALATE ... judged by: jev" with exit 0. It is the
+    decision layer failing, and it has to take the same exit-4 path as a 500.
+    """
+
+    def _offline(self, body):
+        """Patches that serve `body` as Jev's HTTP 200, with no network."""
+        import contextlib
+        import jev
+        from unittest import mock
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.dict(
+            os.environ, {"TYPESAFE_API_KEY": "apikey_test_notreal"}))
+        stack.enter_context(mock.patch.object(
+            jev.urllib.request, "urlopen",
+            return_value=Resp(json.dumps(body).encode())))
+        # Force the raw-HTTP path even where the SDK happens to be installed.
+        stack.enter_context(mock.patch.dict(sys.modules, {"typesafe_sdk": None}))
+        return stack
+
+    def _ask(self, body):
+        with self._offline(body):
+            return route.jev.ask({"intent": "x"}, route.build_questions(ROUTABLE))
+
+    def test_empty_answers_raise(self):
+        with self.assertRaises(route.JevUnavailable):
+            self._ask({"answers": {}})
+
+    def test_no_answers_field_raises(self):
+        with self.assertRaises(route.JevUnavailable):
+            self._ask({"model": "jev-1.13.0"})
+
+    def test_a_partial_response_names_what_is_missing(self):
+        with self.assertRaises(route.JevUnavailable) as ctx:
+            self._ask({"answers": {"agent": {"choice": "claude"}}})
+        self.assertIn("task_kind", str(ctx.exception))
+
+    def test_a_complete_response_passes_through(self):
+        full = {"answers": {k: {"choice": "claude"} for k in
+                            route.build_questions(ROUTABLE)}}
+        self.assertEqual(self._ask(full), full)
+
+    def test_route_cli_exits_4_on_an_answerless_response(self):
+        from unittest import mock
+        reg = {"agents": [dict(a, routable=True) for a in ROUTABLE],
+               "hardware": {"os": "x", "cpu_logical_cores": 1, "ram_total_gb": 1,
+                            "max_vram_gb": None},
+               "local_inference": {"available": False}}
+        argv, stderr = sys.argv, sys.stderr
+        sys.argv, sys.stderr = ["route.py", "add a feature", "--no-trace"], io.StringIO()
+        try:
+            with self._offline({"answers": {}}), \
+                    mock.patch.object(route.probe, "load_cached", return_value=reg):
+                rc = route.main()
+            err = sys.stderr.getvalue()
+        finally:
+            sys.argv, sys.stderr = argv, stderr
+        self.assertEqual(rc, 4)
+        self.assertIn("did not answer", err)
+        self.assertNotIn("ESCALATE", err)
+
+
 class TestCommandRendering(unittest.TestCase):
     def test_prompt_substitution_is_a_single_argv_element(self):
         cmd = route.render_command(
